@@ -11,7 +11,7 @@ use App\Http\Controllers\AuthController;
 */
 
 // Öffentliche Routen (kein Login nötig)
-Route::post('/register', [AuthController::class, 'register']);
+Route::post('/create-user', [AuthController::class, 'store']);
 Route::post('/login', [AuthController::class, 'login']);
 
 // Geschützte Routen (nur mit gültigem Bearer Token zugänglich)
