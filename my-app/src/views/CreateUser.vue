@@ -1,3 +1,4 @@
+<!-- language: vue -->
 <script setup lang="ts">
 import { ref, watch, type Ref } from 'vue'
 
@@ -53,9 +54,10 @@ function toggleFromList(listRef: Ref<string[]>, dept: string) {
   }
 }
 
-const toggleOfficeDepartment = (dept: string) => toggleFromList(officeDepartments, dept)
-const toggleDepartmentHeadDepartment = (dept: string) => toggleFromList(departmentHeadDepartments, dept)
-const toggleTrainerDepartment = (dept: string) => toggleFromList(trainerDepartments, dept)
+const toggleDepartmentHeadDepartment = (dept: string) =>
+    toggleFromList(departmentHeadDepartments, dept)
+const toggleTrainerDepartment = (dept: string) =>
+    toggleFromList(trainerDepartments, dept)
 
 async function onSubmit() {
   const result = await Promise.resolve(form.value?.validate?.())
@@ -110,43 +112,23 @@ async function onSubmit() {
               class="mb-4"
           />
 
-          <div
-              class="role-row"
-              v-for="role in ['office','departmentHead','trainer']"
-              :key="role"
-          >
+          <!-- Geschäftsstelle: nur Checkbox, kein Dropdown -->
+          <div class="role-row">
             <label class="role-checkbox">
-              <input
-                  type="checkbox"
-                  v-if="role === 'office'"
-                  v-model="isOffice"
-              />
-              <input
-                  type="checkbox"
-                  v-else-if="role === 'departmentHead'"
-                  v-model="isDepartmentHead"
-              />
-              <input
-                  type="checkbox"
-                  v-else
-                  v-model="isTrainer"
-              />
-              <span>
-                {{
-                  role === 'office'
-                      ? 'Geschäftsstelle'
-                      : role === 'departmentHead'
-                          ? 'Abteilungsleitung'
-                          : 'Übungsleiter'
-                }}
-              </span>
+              <input type="checkbox" v-model="isOffice" />
+              <span>Geschäftsstelle</span>
+            </label>
+          </div>
+
+          <!-- Abteilungsleitung: Checkbox + Dropdown -->
+          <div class="role-row">
+            <label class="role-checkbox">
+              <input type="checkbox" v-model="isDepartmentHead" />
+              <span>Abteilungsleitung</span>
             </label>
 
             <div class="role-dropdown-wrapper">
-              <div
-                  v-if="role === 'office' && isOffice"
-                  class="dropdown"
-              >
+              <div v-if="isDepartmentHead" class="dropdown">
                 <div class="dropdown-header">Abteilung</div>
                 <div class="dropdown-list">
                   <div
@@ -154,27 +136,8 @@ async function onSubmit() {
                       :key="dept"
                       class="dropdown-item"
                       :class="{
-                      'dropdown-item--selected': officeDepartments.includes(dept),
-                    }"
-                      @click="toggleOfficeDepartment(dept)"
-                  >
-                    {{ dept }}
-                  </div>
-                </div>
-              </div>
-
-              <div
-                  v-else-if="role === 'departmentHead' && isDepartmentHead"
-                  class="dropdown"
-              >
-                <div class="dropdown-header">Abteilung</div>
-                <div class="dropdown-list">
-                  <div
-                      v-for="dept in departments"
-                      :key="dept"
-                      class="dropdown-item"
-                      :class="{
-                      'dropdown-item--selected': departmentHeadDepartments.includes(dept),
+                      'dropdown-item--selected':
+                        departmentHeadDepartments.includes(dept),
                     }"
                       @click="toggleDepartmentHeadDepartment(dept)"
                   >
@@ -182,11 +145,18 @@ async function onSubmit() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div
-                  v-else-if="role === 'trainer' && isTrainer"
-                  class="dropdown"
-              >
+          <!-- Übungsleiter: Checkbox + Dropdown -->
+          <div class="role-row">
+            <label class="role-checkbox">
+              <input type="checkbox" v-model="isTrainer" />
+              <span>Übungsleiter</span>
+            </label>
+
+            <div class="role-dropdown-wrapper">
+              <div v-if="isTrainer" class="dropdown">
                 <div class="dropdown-header">Abteilung</div>
                 <div class="dropdown-list">
                   <div
@@ -194,7 +164,9 @@ async function onSubmit() {
                       :key="dept"
                       class="dropdown-item"
                       :class="{
-                      'dropdown-item--selected': trainerDepartments.includes(dept),
+                      'dropdown-item--selected': trainerDepartments.includes(
+                        dept
+                      ),
                     }"
                       @click="toggleTrainerDepartment(dept)"
                   >
