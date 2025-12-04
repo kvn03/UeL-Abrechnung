@@ -7,6 +7,7 @@ import EnterPassword from '../views/EnterPassword.vue'
 import SetPassword from '../views/SetPassword.vue'
 import NoPassword from '../views/NoPassword.vue'
 import CreateUser from '../views/CreateUser.vue'
+import Timesheet from "../views/Timesheet.vue";
 
 const routes: RouteRecordRaw[] = [
     { path: '/', redirect: { name: 'Login' } },
@@ -16,6 +17,7 @@ const routes: RouteRecordRaw[] = [
     { path: '/set-password', name: 'SetPassword', component: SetPassword },
     { path: '/no-password', name: 'NoPassword', component: NoPassword },
     { path: '/create-user', name: 'CreateUser', component: CreateUser, meta: { requiresAuth: true }},
+    { path: '/timesheet', name: 'Timesheet', component: Timesheet, meta: { requiresAuth: true } },
 ]
 
 const router = createRouter({
