@@ -28,6 +28,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::get('/dashboard', [AuthController::class, 'dashboard']);
     Route::get('/meine-uel-abteilungen', [AbteilungController::class, 'getMeineUelAbteilungen']);
     Route::post('/stundeneintrag', [StundeneintragController::class, 'store']);
+    Route::get('/entwuerfe', [StundeneintragController::class, 'getEntwuerfe']);
+    Route::delete('/stundeneintrag/{id}', [StundeneintragController::class, 'deleteEintrag']);
+    Route::get('/stundeneintrag/{id}', [StundeneintragController::class, 'show']);
+    Route::put('/stundeneintrag/{id}', [StundeneintragController::class, 'update']);
 
     //Admin-Routen
     Route::group(['middleware' => ['admin']], function ()

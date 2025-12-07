@@ -58,7 +58,7 @@ class StundeneintragController extends Controller
                     'fk_statusID'         => $validated['status_id'],
                     'modifiedBy'          => Auth::id(),
                     'modifiedAt'          => now(),
-                    'kommentar'           => 'Eintrag neu erstellt.',
+                    'kommentar'           => ($validated['status_id'] == 4) ? 'Entwurf erstellt' : 'Stundeneintrag eingereicht',
                 ]);
             });
 
@@ -80,6 +80,132 @@ class StundeneintragController extends Controller
             return response()->json([
                 'message' => 'Stundeneintrag als Entwurf erstellt',
             ], 201);
+        }
+    }
+
+    /**
+     * Gibt alle Einträge zurück, deren aktueller Status "Entwurf" (ID 4) ist.
+     */
+    public function getEntwuerfe(Request $request)
+    {
+        $userId = $request->user()->UserID; // Oder ->id, je nach Model
+
+        // 1. Alle Einträge des Users laden
+        // Wir laden 'abteilung' und 'aktuellerStatusLog' direkt mit (Eager Loading)
+        $eintraege = Stundeneintrag::where('createdBy', $userId)
+            ->with(['abteilung', 'aktuellerStatusLog'])
+            ->orderBy('datum', 'desc') // Neueste zuerst
+            ->get();
+
+        // 2. Filtern: Wir wollen nur die, wo der NEUESTE Status == 4 (Entwurf) ist
+        $entwuerfe = $eintraege->filter(function ($eintrag) {
+            // Prüfen, ob es überhaupt einen Status gibt und ob dieser 4 ist
+            return $eintrag->aktuellerStatusLog && $eintrag->aktuellerStatusLog->fk_statusID == 4;
+        })->values(); // Keys zurücksetzen für sauberes JSON Array
+
+        return response()->json($entwuerfe);
+    }
+
+    /**
+     * Löscht einen Stundeneintrag (und via Cascade auch die Logs).
+     */
+    public function deleteEintrag(Request $request, $id)
+    {
+        // 1. Den Eintrag suchen
+        $eintrag = Stundeneintrag::find($id);
+
+        if (!$eintrag) {
+            return response()->json(['message' => 'Eintrag nicht gefunden.'], 404);
+        }
+
+        // 2. SICHERHEIT: Gehört der Eintrag dem User?
+        // Wir vergleichen die createdBy Spalte mit der ID des eingeloggten Users
+        if ($eintrag->createdBy != $request->user()->UserID) {
+            return response()->json(['message' => 'Dazu bist du nicht berechtigt.'], 403);
+        }
+
+        // 3. Optional: Prüfen, ob es wirklich nur ein Entwurf ist
+        // (Falls man eingereichte Stunden nicht mehr löschen darf)
+        $currentStatus = $eintrag->aktuellerStatusLog->fk_statusID ?? 0;
+        if ($currentStatus != 4) { // 4 = Entwurf
+           return response()->json(['message' => 'Nur Entwürfe können gelöscht werden.'], 403);
+        }
+
+        // 4. Löschen
+        // Dank 'onDelete cascade' in der DB werden die Logs automatisch mit entfernt
+        $eintrag->delete();
+
+        return response()->json(['message' => 'Eintrag erfolgreich gelöscht.']);
+    }
+
+    /**
+     * Lädt einen einzelnen Eintrag zum Bearbeiten
+     */
+    public function show(Request $request, $id)
+    {
+        $eintrag = Stundeneintrag::find($id);
+
+        // Sicherheitscheck: Gehört der Eintrag mir?
+        if (!$eintrag || $eintrag->createdBy != $request->user()->UserID) {
+            return response()->json(['message' => 'Nicht gefunden oder kein Zugriff'], 403);
+        }
+
+        return response()->json($eintrag);
+    }
+
+    /**
+     * Aktualisiert einen bestehenden Eintrag
+     */
+    public function update(Request $request, $id)
+    {
+        $eintrag = Stundeneintrag::find($id);
+
+        if (!$eintrag || $eintrag->createdBy != $request->user()->UserID) {
+            return response()->json(['message' => 'Kein Zugriff'], 403);
+        }
+
+        // 1. Validierung (fast gleich wie store, status_id wieder wichtig)
+        $validated = $request->validate([
+            'datum'         => 'required|date',
+            'beginn'        => 'required|date_format:H:i',
+            'ende'          => 'required|date_format:H:i|after:beginn',
+            'kurs'          => 'nullable|string',
+            'fk_abteilung'  => 'nullable|exists:abteilung_definition,AbteilungID',
+            'status_id'     => 'required|integer|in:2,4', // 2=Senden, 4=Entwurf
+        ]);
+
+        $start = Carbon::createFromFormat('H:i', $validated['beginn']);
+        $end   = Carbon::createFromFormat('H:i', $validated['ende']);
+        $dauer = $start->diffInMinutes($end) / 60;
+
+        try {
+            DB::transaction(function () use ($validated, $dauer, $eintrag, $request) {
+
+                // A. Hauptdatensatz updaten
+                $eintrag->update([
+                    'datum'        => $validated['datum'],
+                    'beginn'       => $validated['beginn'],
+                    'ende'         => $validated['ende'],
+                    'dauer'        => $dauer,
+                    'kurs'         => $validated['kurs'] ?? null,
+                    'fk_abteilung' => $validated['fk_abteilung'] ?? null,
+                    // createdBy bleibt unverändert!
+                ]);
+
+                // B. NEUEN Status-Log Eintrag schreiben (Historie fortschreiben)
+                StundeneintragStatusLog::create([
+                    'fk_stundeneintragID' => $eintrag->EintragID,
+                    'fk_statusID'         => $validated['status_id'],
+                    'modifiedBy'          => $request->user()->UserID,
+                    'modifiedAt'          => now(),
+                    'kommentar'           => ($validated['status_id'] == 4) ? 'Entwurf aktualisiert' : 'Entwurf final eingereicht',
+                ]);
+            });
+
+            return response()->json(['message' => 'Erfolgreich aktualisiert']);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Fehler beim Update', 'error' => $e->getMessage()], 500);
         }
     }
 }
