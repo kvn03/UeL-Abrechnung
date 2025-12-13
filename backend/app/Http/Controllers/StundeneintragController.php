@@ -23,7 +23,7 @@ class StundeneintragController extends Controller
             'ende'          => 'required|date_format:H:i|after:beginn', // Ende muss nach Beginn sein
             'kurs'          => 'nullable|string',
             'fk_abteilung'  => 'nullable|exists:abteilung_definition,AbteilungID', // Prüft, ob Abteilung existiert
-            'status_id'         => 'required|integer|in:2,4',
+            'status_id'         => 'required|integer|in:10,11,12',
         ]);
 
         // 2. Dauer automatisch berechnen (optional, aber praktisch)
@@ -71,16 +71,9 @@ class StundeneintragController extends Controller
         }
 
         // HIER ÄNDERN: Am Ende der Funktion immer JSON zurückgeben (kein redirect!)
-        if($validated['status_id'] == 2) {
             return response()->json([
-                'message' => 'Stundeneintrag erfolgreich erstellt und eingereicht',
+                'message' => 'Stundeneintrag erfolgreich erstell',
             ], 201);
-        }
-        elseif ($validated['status_id'] == 4) {
-            return response()->json([
-                'message' => 'Stundeneintrag als Entwurf erstellt',
-            ], 201);
-        }
     }
 
     /**
@@ -100,7 +93,7 @@ class StundeneintragController extends Controller
         // 2. Filtern: Wir wollen nur die, wo der NEUESTE Status == 4 (Entwurf) ist
         $entwuerfe = $eintraege->filter(function ($eintrag) {
             // Prüfen, ob es überhaupt einen Status gibt und ob dieser 4 ist
-            return $eintrag->aktuellerStatusLog && $eintrag->aktuellerStatusLog->fk_statusID == 4;
+            return $eintrag->aktuellerStatusLog && $eintrag->aktuellerStatusLog->fk_statusID == 10;
         })->values(); // Keys zurücksetzen für sauberes JSON Array
 
         return response()->json($entwuerfe);
@@ -127,7 +120,7 @@ class StundeneintragController extends Controller
         // 3. Optional: Prüfen, ob es wirklich nur ein Entwurf ist
         // (Falls man eingereichte Stunden nicht mehr löschen darf)
         $currentStatus = $eintrag->aktuellerStatusLog->fk_statusID ?? 0;
-        if ($currentStatus != 4) { // 4 = Entwurf
+        if ($currentStatus != 10) { // 4 = Entwurf
            return response()->json(['message' => 'Nur Entwürfe können gelöscht werden.'], 403);
         }
 
@@ -171,7 +164,7 @@ class StundeneintragController extends Controller
             'ende'          => 'required|date_format:H:i|after:beginn',
             'kurs'          => 'nullable|string',
             'fk_abteilung'  => 'nullable|exists:abteilung_definition,AbteilungID',
-            'status_id'     => 'required|integer|in:2,4', // 2=Senden, 4=Entwurf
+            'status_id'     => 'required|integer|in:10,11,12', // 2=Senden, 4=Entwurf
         ]);
 
         $start = Carbon::createFromFormat('H:i', $validated['beginn']);

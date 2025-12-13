@@ -24,7 +24,6 @@ const entryId = ref<string | null>(null)
 const isEditMode = computed(() => !!entryId.value)
 
 const departments = ref<Department[]>([])
-// WICHTIG: Diese Variable fehlte vorher!
 const courseOptions = ['Training', 'Wettkampf', 'Vorbereitung', 'Sonstiges']
 
 // Snapshot für Änderungen
@@ -61,7 +60,6 @@ async function loadEntry(id: string) {
     course.value = data.kurs
     selectedDepartment.value = data.fk_abteilung
 
-    // Snapshot speichern
     originalData.value = {
       datum: date.value,
       beginn: startTime.value,
@@ -87,7 +85,6 @@ function hasChanges(): boolean {
   const isCourseSame = course.value === originalData.value.kurs
   const isDeptSame = selectedDepartment.value === originalData.value.fk_abteilung
 
-  // Gibt true zurück, wenn IRGENDWAS anders ist
   return !(isDateSame && isStartSame && isEndSame && isCourseSame && isDeptSame)
 }
 
@@ -105,14 +102,13 @@ onMounted(async () => {
 const requiredRule = [(v: any) => !!v || 'Pflichtfeld']
 const endTimeRules = [(v: string) => !startTime.value || v > startTime.value || 'Ende > Beginn']
 
-// --- NEU: Funktion zum Löschen ---
 async function deleteEntry() {
-  if (!confirm("Möchtest du diesen Entwurf wirklich löschen?")) return
+  if (!confirm("Möchtest du diesen Eintrag wirklich löschen?")) return
 
   isLoading.value = true
   try {
     await axios.delete(`http://127.0.0.1:8000/api/stundeneintrag/${entryId.value}`)
-    router.push({ name: 'Drafts' }) // Zurück zur Übersicht
+    router.push({ name: 'Drafts' })
   } catch (error: any) {
     alert("Fehler beim Löschen: " + (error.response?.data?.message || 'Unbekannt'))
   } finally {
@@ -120,42 +116,40 @@ async function deleteEntry() {
   }
 }
 
-// --- SUBMIT ---
-async function onSubmit(targetStatusId: number) {
+// --- SUBMIT (Vereinfacht: Immer Status 10) ---
+async function onSubmit() {
   const { valid } = await form.value?.validate() || { valid: false }
   if (!valid) return
 
-  // WICHTIGE ÄNDERUNG:
-  // Wir blockieren NUR, wenn keine Änderungen da sind UND man wieder als Entwurf (4) speichern will.
-  // Wenn man "Abschicken" (2) will, ist das okay, weil sich ja der Status ändert.
-  if (isEditMode.value && !hasChanges() && targetStatusId === 4) {
+  // Nur prüfen wenn wir bearbeiten.
+  // Wenn wir bearbeiten und nichts geändert haben -> Abbruch
+  if (isEditMode.value && !hasChanges()) {
     alert("Es wurden keine Änderungen vorgenommen.")
     return
   }
 
   isLoading.value = true
 
+  // Wir setzen hier hart die 10 ("Offen")
   const payload = {
     datum: date.value,
     beginn: startTime.value,
     ende: endTime.value,
     kurs: course.value,
     fk_abteilung: selectedDepartment.value,
-    status_id: targetStatusId
+    status_id: 10
   }
 
   try {
     if (isEditMode.value) {
       // UPDATE (PUT)
       await axios.put(`http://127.0.0.1:8000/api/stundeneintrag/${entryId.value}`, payload)
-      alert(targetStatusId === 4 ? "Entwurf aktualisiert." : "Stunden eingereicht!")
+      alert("Eintrag aktualisiert!")
     } else {
       // NEU (POST)
       await axios.post('http://127.0.0.1:8000/api/stundeneintrag', payload)
-      alert(targetStatusId === 4 ? "Als Entwurf gespeichert." : "Stunden eingereicht!")
+      alert("Eintrag erfolgreich erstellt!")
     }
-
-    // Nach Erfolg zurück
     goBack()
 
   } catch (error: any) {
@@ -167,6 +161,8 @@ async function onSubmit(targetStatusId: number) {
 }
 
 function goBack() {
+  // Je nach Workflow kannst du hier entscheiden, wohin es zurückgeht.
+  // Dashboard macht meist Sinn, wenn es keine Entwurfsliste mehr gibt.
   if (isEditMode.value) router.push({ name: 'Drafts' })
   else router.push({ name: 'Dashboard' })
 }
@@ -184,7 +180,7 @@ function goBack() {
       <v-progress-linear v-if="isLoading" indeterminate color="primary" absolute top></v-progress-linear>
 
       <v-card-title class="pa-0 pb-4 d-flex justify-space-between align-center">
-        <h3 class="ma-0">{{ isEditMode ? 'Entwurf bearbeiten' : 'Stundenerfassung' }}</h3>
+        <h3 class="ma-0">{{ isEditMode ? 'Eintrag bearbeiten' : 'Stundenerfassung' }}</h3>
 
         <v-btn
             v-if="isEditMode"
@@ -192,7 +188,7 @@ function goBack() {
             variant="text"
             icon="mdi-delete"
             @click="deleteEntry"
-            title="Entwurf löschen"
+            title="Eintrag löschen"
         ></v-btn>
       </v-card-title>
 
@@ -206,26 +202,16 @@ function goBack() {
           </div>
           <v-combobox v-model="course" :items="courseOptions" label="Kurs" variant="outlined" density="comfortable" class="mb-4"></v-combobox>
 
-          <div class="d-flex justify-center mt-6 flex-wrap" style="gap: 16px;">
-            <v-btn
-                color="blue-grey-lighten-4"
-                variant="flat"
-                style="min-width:140px"
-                prepend-icon="mdi-content-save-outline"
-                :loading="isLoading"
-                @click="onSubmit(4)"
-            >
-              {{ isEditMode ? 'Update Entwurf' : 'Entwurf' }}
-            </v-btn>
-
+          <div class="d-flex justify-center mt-6">
             <v-btn
                 color="primary"
-                style="min-width:140px"
-                prepend-icon="mdi-send"
+                class="submit-btn"
+                style="min-width:160px"
+                prepend-icon="mdi-content-save-check"
                 :loading="isLoading"
-                @click="onSubmit(2)"
+                @click="onSubmit()"
             >
-              Abschicken
+              {{ isEditMode ? 'Speichern' : 'Erstellen' }}
             </v-btn>
           </div>
 

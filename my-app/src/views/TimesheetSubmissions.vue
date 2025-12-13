@@ -11,7 +11,7 @@ function goBack() {
 }
 
 // [BACKEND] Hier einfach die finale URL eintragen
-const API_URL = 'http://127.0.0.1:8000/api/PLACEHOLDER-timesheet-submissions'
+const API_URL = 'http://127.0.0.1:8000/api/abrechnung/summary'
 
 // State für die Abrechnungsübersicht
 const isLoading = ref<boolean>(false)

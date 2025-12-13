@@ -1,5 +1,3 @@
-<!-- language: vue -->
-<!-- my-app/src/views/ReleaseSubmissions.vue -->
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -11,38 +9,44 @@ function goBack() {
   router.push({ name: 'Dashboard' })
 }
 
-// [BACKEND] Hier später die finale URL eintragen
-const API_URL = 'http://127.0.0.1:8000/api/PLACEHOLDER-release-submissions'
+const API_URL = 'http://127.0.0.1:8000/api/abteilungsleiter/abrechnungen'
 
-// Typ für einen Eintrag in der Freigabe-Liste
+// Detail-Typ für einen einzelnen Stundeneintrag
+interface TimesheetEntry {
+  datum: string
+  beginn: string
+  ende: string
+  dauer: number
+  kurs: string
+}
+
+// Haupt-Typ für die Abrechnung
 interface Submission {
-  id: number
-  uebungsleiter: string
-  abteilung: string
+  AbrechnungID: number
+  mitarbeiterName: string
   zeitraum: string
   stunden: number
-  betrag: number
-  status: 'offen' | 'freigegeben'
+  datumEingereicht: string
+  // NEU: Das Array der Details
+  details: TimesheetEntry[]
 }
 
-// Typ für die erwartete API-Antwort
-interface ReleaseSubmissionsResponse {
-  submissions: Submission[]
-}
-
-// State
 const isLoading = ref<boolean>(false)
 const errorMessage = ref<string | null>(null)
 const submissions = ref<Submission[]>([])
+const isProcessingId = ref<number | null>(null)
 
-// Daten vom Backend holen
+// Speichert, welche IDs gerade aufgeklappt sind
+const expandedIds = ref<number[]>([])
+
 async function fetchReleaseSubmissions() {
   isLoading.value = true
   errorMessage.value = null
+  expandedIds.value = [] // Reset beim Laden
 
   try {
-    const response = await axios.get<ReleaseSubmissionsResponse>(API_URL)
-    submissions.value = response.data.submissions
+    const response = await axios.get<Submission[]>(API_URL)
+    submissions.value = response.data
   } catch (error: any) {
     errorMessage.value =
         error?.response?.data?.message ||
@@ -52,13 +56,26 @@ async function fetchReleaseSubmissions() {
   }
 }
 
-// Platzhalter für "Freigeben"
 async function approveSubmission(id: number) {
-  // [BACKEND] Hier später POST/PUT auf die API, z.B.:
-  // await axios.post(`${API_URL}/${id}/approve`)
-  const item = submissions.value.find(s => s.id === id)
-  if (item) {
-    item.status = 'freigegeben'
+  if (!confirm("Möchtest du diese Abrechnung wirklich genehmigen?")) return
+  isProcessingId.value = id
+
+  try {
+    await axios.post(`${API_URL}/${id}/approve`)
+    submissions.value = submissions.value.filter(item => item.AbrechnungID !== id)
+  } catch (error: any) {
+    alert("Fehler beim Genehmigen: " + (error.response?.data?.message || "Unbekannter Fehler"))
+  } finally {
+    isProcessingId.value = null
+  }
+}
+
+// Funktion zum Auf-/Zuklappen
+function toggleDetails(id: number) {
+  if (expandedIds.value.includes(id)) {
+    expandedIds.value = expandedIds.value.filter(x => x !== id)
+  } else {
+    expandedIds.value.push(id)
   }
 }
 
@@ -83,7 +100,6 @@ onMounted(() => {
     <v-card elevation="6" class="pa-4">
       <v-card-title class="pa-0 mb-4 d-flex align-center justify-space-between">
         <h3 class="ma-0">Abrechnungen freigeben</h3>
-
         <v-btn
             size="small"
             variant="text"
@@ -96,12 +112,11 @@ onMounted(() => {
       </v-card-title>
 
       <v-card-text class="pa-0">
-        <!-- Ladezustand -->
         <div v-if="isLoading" class="placeholder">
+          <v-progress-circular indeterminate color="primary" class="mb-2"></v-progress-circular>
           Daten werden geladen ...
         </div>
 
-        <!-- Fehlermeldung -->
         <v-alert
             v-else-if="errorMessage"
             type="error"
@@ -111,75 +126,85 @@ onMounted(() => {
           {{ errorMessage }}
         </v-alert>
 
-        <!-- Liste der Abrechnungen -->
         <div v-else-if="submissions.length > 0" class="list">
           <div
               v-for="item in submissions"
-              :key="item.id"
-              class="submission-row"
+              :key="item.AbrechnungID"
+              class="submission-wrapper"
           >
-            <div class="submission-main">
-              <div class="line">
-                <span class="label">Übungsleiter:</span>
-                <span class="value">{{ item.uebungsleiter }}</span>
+            <div
+                class="submission-row"
+                @click="toggleDetails(item.AbrechnungID)"
+            >
+              <div class="submission-main">
+                <div class="line">
+                  <span class="label">Mitarbeiter:</span>
+                  <span class="value font-weight-bold">{{ item.mitarbeiterName }}</span>
+                </div>
+                <div class="line">
+                  <span class="label">Zeitraum:</span>
+                  <span class="value">{{ item.zeitraum }}</span>
+                </div>
+                <div class="line">
+                  <span class="label">Eingereicht am:</span>
+                  <span class="value">{{ item.datumEingereicht }}</span>
+                </div>
+                <div class="line">
+                  <span class="label">Gesamt:</span>
+                  <span class="value font-weight-bold text-primary">
+                    {{ item.stunden.toLocaleString('de-DE') }} Std.
+                  </span>
+                </div>
               </div>
-              <div class="line">
-                <span class="label">Abteilung:</span>
-                <span class="value">{{ item.abteilung }}</span>
-              </div>
-              <div class="line">
-                <span class="label">Zeitraum:</span>
-                <span class="value">{{ item.zeitraum }}</span>
-              </div>
-              <div class="line">
-                <span class="label">Stunden:</span>
-                <span class="value">
-                  {{
-                    item.stunden.toLocaleString('de-DE', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })
-                  }}
-                  Std.
-                </span>
-              </div>
-              <div class="line">
-                <span class="label">Betrag:</span>
-                <span class="value">
-                  {{
-                    item.betrag.toLocaleString('de-DE', {
-                      style: 'currency',
-                      currency: 'EUR'
-                    })
-                  }}
-                </span>
-              </div>
-              <div class="line">
-                <span class="label">Status:</span>
-                <span class="value">
-                  {{ item.status === 'offen' ? 'Offen' : 'Freigegeben' }}
-                </span>
+
+              <div class="submission-actions">
+                <v-icon
+                    :icon="expandedIds.includes(item.AbrechnungID) ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+                    class="mr-4 text-medium-emphasis"
+                ></v-icon>
+
+                <v-btn
+                    size="small"
+                    color="success"
+                    variant="flat"
+                    :loading="isProcessingId === item.AbrechnungID"
+                    :disabled="isProcessingId !== null"
+                    @click.stop="approveSubmission(item.AbrechnungID)"
+                    prepend-icon="mdi-check"
+                >
+                  Freigeben
+                </v-btn>
               </div>
             </div>
 
-            <div class="submission-actions">
-              <v-btn
-                  size="small"
-                  color="success"
-                  variant="tonal"
-                  :disabled="item.status === 'freigegeben'"
-                  @click="approveSubmission(item.id)"
-              >
-                Freigeben
-              </v-btn>
-            </div>
+            <v-expand-transition>
+              <div v-if="expandedIds.includes(item.AbrechnungID)" class="details-container">
+                <v-table density="compact" class="bg-transparent">
+                  <thead>
+                  <tr>
+                    <th class="text-left">Datum</th>
+                    <th class="text-left">Zeit</th>
+                    <th class="text-left">Kurs/Info</th>
+                    <th class="text-right">Dauer</th>
+                  </tr>
+                  </thead>
+                  <tbody>
+                  <tr v-for="(detail, i) in item.details" :key="i">
+                    <td>{{ detail.datum }}</td>
+                    <td>{{ detail.beginn }} - {{ detail.ende }}</td>
+                    <td>{{ detail.kurs }}</td>
+                    <td class="text-right">{{ detail.dauer }} Std.</td>
+                  </tr>
+                  </tbody>
+                </v-table>
+              </div>
+            </v-expand-transition>
           </div>
         </div>
 
-        <!-- Fallback -->
         <div v-else class="placeholder">
-          Hier werden später die eingereichten Abrechnungen deiner
-          Abteilungen angezeigt, die du prüfen und freigeben kannst.
+          <v-icon icon="mdi-check-all" size="large" color="success" class="mb-2"></v-icon>
+          Aktuell keine offenen Freigaben vorhanden.
         </div>
       </v-card-text>
     </v-card>
@@ -196,6 +221,7 @@ onMounted(() => {
 .placeholder {
   min-height: 220px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   color: rgba(0, 0, 0, 0.6);
@@ -214,13 +240,29 @@ onMounted(() => {
   gap: 12px;
 }
 
+/* Wrapper um Row + Details */
+.submission-wrapper {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  overflow: hidden; /* Für saubere Ecken */
+  transition: box-shadow 0.2s;
+}
+
+.submission-wrapper:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
+
 .submission-row {
   display: flex;
   justify-content: space-between;
-  align-items: stretch;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: rgba(0,0,0,0.02);
+  align-items: center;
+  padding: 16px;
+  cursor: pointer; /* Zeigt Klickbarkeit an */
+}
+
+.submission-row:hover {
+  background-color: #f9f9f9;
 }
 
 .submission-main {
@@ -230,26 +272,32 @@ onMounted(() => {
 .line {
   display: flex;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
-
-.line:last-child {
-  margin-bottom: 0;
-}
+.line:last-child { margin-bottom: 0; }
 
 .label {
-  min-width: 110px;
+  min-width: 120px;
   font-weight: 500;
-  color: rgba(0, 0, 0, 0.7);
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 0.9rem;
 }
 
 .value {
   font-weight: 400;
+  color: rgba(0, 0, 0, 0.87);
 }
 
 .submission-actions {
   display: flex;
   align-items: center;
-  margin-left: 16px;
+  margin-left: 24px;
+}
+
+/* Der Detailbereich */
+.details-container {
+  background-color: #fafafa;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  padding: 0 16px 16px 16px;
 }
 </style>
