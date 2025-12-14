@@ -11,7 +11,7 @@ import Timesheet from "../views/Timesheet.vue";
 import Submitted from "../views/Submitted.vue";
 import Drafts from "../views/Drafts.vue";
 import TimesheetSubmissions from "../views/TimesheetSubmissions.vue";
-import ReleaseSubmissions from '../views/ReleaseSubmissions.vue'
+import AlReleaseSubmissions from '../views/AL_ReleaseSubmissions.vue'
 import AllTimesheetSubmissions from "../views/AllTimesheetSubmissions.vue";
 import TimesheetHistory from "../views/TimesheetHistory.vue";
 import TimesheetsToPay from "../views/TimesheetsToPay.vue";
@@ -28,7 +28,7 @@ const routes: RouteRecordRaw[] = [
     { path: '/drafts', name: 'Drafts', component: Drafts, meta: { requiresAuth: true } },
     { path: '/submitted', name: 'Submitted', component: Submitted, meta: { requiresAuth: true } },
     { path: '/timesheet-submissions', name: 'TimesheetSubmissions', component: TimesheetSubmissions, meta: { requiresAuth: true } },
-    { path: '/release-submissions', name: 'ReleaseSubmissions', component: ReleaseSubmissions, meta: { requiresAuth: true } },
+    { path: '/release-submissions', name: 'ReleaseSubmissions', component: AlReleaseSubmissions, meta: { requiresAuth: true } },
     { path: '/all-timesheet-submissions', name: 'AllTimesheetSubmissions', component: AllTimesheetSubmissions, meta: { requiresAuth: true } },
     { path: '/timesheet-history', name: 'TimesheetHistory', component: TimesheetHistory, meta: { requiresAuth: true } },
     { path: '/timesheets-to-pay', name: 'TimesheetsToPay', component: TimesheetsToPay, meta: { requiresAuth: true } },

@@ -6,6 +6,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AbteilungController;
 use App\Http\Controllers\StundeneintragController;
 use App\Http\Controllers\AbrechnungController;
+use App\Http\Controllers\AbteilungsleiterController;
 
 /*
 |--------------------------------------------------------------------------
@@ -43,8 +44,11 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     //Abteilungsleiter-Routen
     Route::group(['middleware' => ['al']], function ()
     {
-        Route::get('/abteilungsleiter/abrechnungen', [AbrechnungController::class, 'getOffeneAbrechnungen']);
-        Route::post('/abteilungsleiter/abrechnungen/{id}/approve', [AbrechnungController::class, 'approve']);
+        Route::get('/abteilungsleiter/abrechnungen', [AbteilungsleiterController::class, 'getOffeneAbrechnungen']);
+        Route::post('/abteilungsleiter/abrechnungen/{id}/approve', [AbteilungsleiterController::class, 'approve']);
+        Route::post('/abteilungsleiter/stundeneintrag', [AbteilungsleiterController::class, 'addEntry']);
+        Route::put('/abteilungsleiter/stundeneintrag/{id}', [AbteilungsleiterController::class, 'updateEntry']);
+        Route::delete('/abteilungsleiter/stundeneintrag/{id}', [AbteilungsleiterController::class, 'deleteEntry']);
     });
     //Admin-Routen
     Route::group(['middleware' => ['admin']], function ()

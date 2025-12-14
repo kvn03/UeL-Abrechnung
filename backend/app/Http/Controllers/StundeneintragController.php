@@ -193,7 +193,7 @@ class StundeneintragController extends Controller
                     'fk_statusID'         => $validated['status_id'],
                     'modifiedBy'          => $request->user()->UserID,
                     'modifiedAt'          => now(),
-                    'kommentar'           => ($validated['status_id'] == 4) ? 'Entwurf aktualisiert' : 'Entwurf final eingereicht',
+                    'kommentar'           => ($validated['status_id'] == 10) ? 'Entwurf aktualisiert' : 'Entwurf final eingereicht',
                 ]);
             });
 

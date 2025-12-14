@@ -169,107 +169,15 @@ class AbrechnungController extends Controller
         }
 
         return response()->json([
-            'status'      => $statusText,
+            'status' => match ($statusText) {
+                'AL_Freigabe' => 'Freigabe durch Abteilungsleiter',
+                'GS_Freigabe' => 'Freigabe durch Geschäftsstelle',
+                default => $statusText, // Fallback, falls nichts passt
+            },
             'totalHours'  => round($totalHours, 2),
             'totalAmount' => round($totalAmount, 2),
             'periodLabel' => $periodLabel,
         ]);
-    }
-
-    /**
-     * [GET] Liefert alle Abrechnungen, die der Abteilungsleiter freigeben darf.
-     */
-    public function getOffeneAbrechnungen(Request $request)
-    {
-        $userId = Auth::id();
-
-        // 1. Herausfinden, welche Abteilungen dieser User leitet
-        // Wir suchen in user_rolle_abteilung nach Einträgen, wo er "Abteilungsleiter" ist.
-        $managedAbteilungIds = \App\Models\UserRolleAbteilung::where('fk_userID', $userId)
-            ->whereHas('rolle', function($q) {
-                $q->where('bezeichnung', 'Abteilungsleiter'); // Oder ID prüfen
-            })
-            ->pluck('fk_abteilungID');
-
-        if ($managedAbteilungIds->isEmpty()) {
-            return response()->json([]);
-        }
-
-        // 2. Abrechnungen laden, die zu diesen Abteilungen gehören
-        $abrechnungen = Abrechnung::whereIn('fk_abteilung', $managedAbteilungIds)
-            ->with([
-                'creator', // Damit wir den Namen des Mitarbeiters sehen
-                'stundeneintraege',
-                'statusLogs' => function($q) { $q->orderBy('modifiedAt', 'desc'); },
-                'statusLogs.statusDefinition'
-            ])
-            ->get();
-
-        // 3. Filtern: Wir wollen nur die sehen, deren AKTUELLER Status "Eingereicht" (ID 1) ist.
-        // (Oder Status != Genehmigt). Hier filtern wir in PHP.
-        $offeneAbrechnungen = $abrechnungen->filter(function($abrechnung) {
-            $neuestesLog = $abrechnung->statusLogs->first();
-            // Annahme: Status ID 1 = Eingereicht.
-            // Falls du alle sehen willst, nimm den Filter raus.
-            return $neuestesLog && $neuestesLog->fk_statusID == 20;
-        });
-
-        // 4. Daten formatieren für das Frontend
-        $result = $offeneAbrechnungen->map(function($a) {
-            return [
-                'AbrechnungID' => $a->AbrechnungID,
-                'mitarbeiterName' => $a->creator->vorname . ' ' . $a->creator->name,
-                'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
-                'zeitraum' => \Carbon\Carbon::parse($a->zeitraumVon)->format('d.m.Y') . ' - ' . \Carbon\Carbon::parse($a->zeitraumBis)->format('d.m.Y'),
-                'datumEingereicht' => $a->createdAt->format('d.m.Y'),
-
-                // NEU: Details mitliefern
-                'details' => $a->stundeneintraege->map(function($eintrag) {
-                    return [
-                        'datum' => \Carbon\Carbon::parse($eintrag->datum)->format('d.m.Y'),
-                        'beginn' => \Carbon\Carbon::parse($eintrag->beginn)->format('H:i'),
-                        'ende'   => \Carbon\Carbon::parse($eintrag->ende)->format('H:i'),
-                        'dauer'  => $eintrag->dauer,
-                        'kurs'   => $eintrag->kurs ?? '-', // Falls vorhanden
-                    ];
-                }),
-            ];
-        })->values();
-
-        return response()->json($result);
-    }
-
-    /**
-     * [POST] Eine Abrechnung genehmigen.
-     */
-    public function approve(Request $request, $id)
-    {
-        $userId = Auth::id();
-        $abrechnung = Abrechnung::findOrFail($id);
-
-        // Sicherheitscheck: Ist der User wirklich Abteilungsleiter DIESER Abteilung?
-        $isManager = \App\Models\UserRolleAbteilung::where('fk_userID', $userId)
-            ->where('fk_abteilungID', $abrechnung->fk_abteilung)
-            ->whereHas('rolle', fn($q) => $q->where('bezeichnung', 'Abteilungsleiter'))
-            ->exists();
-
-        if (!$isManager && !Auth::user()->isAdmin) { // Admins dürfen zur Not auch
-            return response()->json(['message' => 'Keine Berechtigung für diese Abteilung'], 403);
-        }
-
-        // Status ID 2 = Genehmigt (Anpassen!)
-        $statusGenehmigt = 21;
-
-        // Log schreiben
-        \App\Models\AbrechnungStatusLog::create([
-            'fk_abrechnungID' => $abrechnung->AbrechnungID,
-            'fk_statusID'     => $statusGenehmigt,
-            'modifiedBy'      => $userId,
-            'modifiedAt'      => now(),
-            'kommentar'       => 'Freigabe durch Abteilungsleiter'
-        ]);
-
-        return response()->json(['message' => 'Abrechnung erfolgreich genehmigt.']);
     }
 
     /**
