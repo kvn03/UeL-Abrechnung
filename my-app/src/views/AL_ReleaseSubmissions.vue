@@ -250,6 +250,11 @@ onMounted(() => {
         </v-btn>
       </v-card-title>
 
+      <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 90%;">
+        In diesem Bereich gibst du als Abteilungsleiter die Abrechnungen für deine Abteilung frei.
+        Du kannst Stundeneinträge bearbeiten, hinzufügen und löschen.
+      </div>
+
       <v-card-text class="pa-0">
         <div v-if="isLoading" class="placeholder">
           <v-progress-circular indeterminate color="primary" class="mb-2"></v-progress-circular>
@@ -266,7 +271,7 @@ onMounted(() => {
             <div class="submission-row" @click="toggleDetails(item.AbrechnungID)">
               <div class="submission-main">
                 <div class="line">
-                  <span class="label">Mitarbeiter:</span>
+                  <span class="label">Übungsleiter:</span>
                   <span class="value font-weight-bold">{{ item.mitarbeiterName }}</span>
                 </div>
                 <div class="line">

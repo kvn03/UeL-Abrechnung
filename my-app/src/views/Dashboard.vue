@@ -79,7 +79,7 @@ const handleLogout = async () => {
       <div>
         <h2>Dashboard</h2>
         <div v-if="user" class="text-subtitle-1 text-medium-emphasis">
-          Hallo, {{ user.vorname }} {{ user.name }}!
+          Wilkommen zurück, {{ user.vorname }} {{ user.name }}!
         </div>
         <div v-else-if="isLoading" class="text-caption">
           Lade Benutzerdaten...
@@ -179,10 +179,10 @@ const handleLogout = async () => {
           <v-btn
               class="w-100"
               color="info"
-              prepend-icon="mdi-file-document-outline"
+              prepend-icon="mdi-check-decagram-outline"
               @click="router.push({ name: 'AllTimesheetSubmissions' })"
           >
-            Alle Abrechnungen
+            Abrechnungen freigeben
           </v-btn>
 
           <v-btn

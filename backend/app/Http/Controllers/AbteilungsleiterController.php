@@ -81,6 +81,7 @@ class AbteilungsleiterController extends Controller
 
                     // ÄNDERUNG: Hier setzen wir den Übungsleiter als Besitzer
                     'createdBy'       => $uelId,
+                    'createdAt'       => now(),
                 ]);
 
                 // Log schreiben
@@ -285,5 +286,4 @@ class AbteilungsleiterController extends Controller
 
         return response()->json(['message' => 'Abrechnung erfolgreich genehmigt.']);
     }
-
 }

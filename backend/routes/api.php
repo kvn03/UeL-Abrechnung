@@ -41,6 +41,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/geschaeftsstelle/abrechnungen', [GeschaeftsstelleController::class, 'getAbrechnungenFuerGeschaeftsstelle']);
         Route::post('/geschaeftsstelle/abrechnungen/{id}/finalize', [GeschaeftsstelleController::class, 'finalize']);
         Route::get('/geschaeftsstelle/abrechnungen-historie', [GeschaeftsstelleController::class, 'getAbrechnungenHistorieFuerGeschaeftsstelle']);
+        Route::post('/geschaeftsstelle/stundeneintrag', [GeschaeftsstelleController::class, 'addEntry']);
+        Route::put('/geschaeftsstelle/stundeneintrag/{id}', [GeschaeftsstelleController::class, 'updateEntry']);
+        Route::delete('/geschaeftsstelle/stundeneintrag/{id}', [GeschaeftsstelleController::class, 'deleteEntry']);
     });
     //Abteilungsleiter-Routen
     Route::group(['middleware' => ['al']], function ()

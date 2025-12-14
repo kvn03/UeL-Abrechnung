@@ -3,8 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Abrechnung;
+use App\Models\Stundeneintrag;
+use App\Models\StundeneintragStatusLog;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class GeschaeftsstelleController extends Controller
 {
@@ -62,7 +66,9 @@ class GeschaeftsstelleController extends Controller
                 'details' => $a->stundeneintraege->map(function($e) {
                     return [
                         'id'    => $e->EintragID, // <<— NEU: eindeutige ID des Stundeneintrags
-                        'datum' => \Carbon\Carbon::parse($e->datum)->format('d.m.Y'),
+                        'datum' => \Carbon\Carbon::parse($e->datum)->format('Y-m-d'), // Besser Y-m-d für Inputs!
+                        'beginn' => \Carbon\Carbon::parse($e->beginn)->format('H:i'),
+                        'ende'   => \Carbon\Carbon::parse($e->ende)->format('H:i'),
                         'dauer' => $e->dauer,
                         'kurs'  => $e->kurs
                     ];
@@ -156,5 +162,142 @@ class GeschaeftsstelleController extends Controller
         })->values();
 
         return response()->json($result);
+    }
+
+    /**
+     * 1. HINZUFÜGEN (Innerhalb einer Abrechnung)
+     */
+    public function addEntry(Request $request)
+    {
+        // Validierung
+        $validated = $request->validate([
+            'datum'           => 'required|date',
+            'beginn'          => 'required|date_format:H:i',
+            'ende'            => 'required|date_format:H:i|after:beginn',
+            'kurs'            => 'nullable|string',
+            'fk_abteilung'    => 'nullable|exists:abteilung_definition,AbteilungID',
+            'fk_abrechnungID' => 'required|exists:abrechnung,AbrechnungID',
+            'status_id'       => 'required|integer',
+        ]);
+
+        // --- NEU: Übungsleiter ID ermitteln ---
+        // Wir laden die Abrechnung, um zu sehen, wem sie gehört.
+        $abrechnung = Abrechnung::findOrFail($validated['fk_abrechnungID']);
+        $uelId = $abrechnung->createdBy; // Das ist die ID des Übungsleiters
+
+        // Dauer berechnen
+        $start = Carbon::createFromFormat('H:i', $validated['beginn']);
+        $end   = Carbon::createFromFormat('H:i', $validated['ende']);
+        $dauer = $start->diffInMinutes($end) / 60;
+
+        try {
+            // Variable $uelId an die Closure übergeben ('use')
+            DB::transaction(function () use ($validated, $dauer, $uelId) {
+                // Eintrag erstellen
+                $eintrag = Stundeneintrag::create([
+                    'datum'           => $validated['datum'],
+                    'beginn'          => $validated['beginn'],
+                    'ende'            => $validated['ende'],
+                    'dauer'           => $dauer,
+                    'kurs'            => $validated['kurs'] ?? null,
+                    'fk_abteilung'    => $validated['fk_abteilung'] ?? null,
+                    'fk_abrechnungID' => $validated['fk_abrechnungID'],
+
+                    // ÄNDERUNG: Hier setzen wir den Übungsleiter als Besitzer
+                    'createdBy'       => $uelId,
+                    'createdAt'       => now(),
+                ]);
+
+                // Log schreiben
+                StundeneintragStatusLog::create([
+                    'fk_stundeneintragID' => $eintrag->EintragID,
+                    'fk_statusID'         => $validated['status_id'],
+                    // Im Log steht weiterhin der GS (Auth::id()), damit man nachvollziehen kann, wer es war.
+                    'modifiedBy'          => Auth::id(),
+                    'modifiedAt'          => now(),
+                    'kommentar'           => 'Von Geschaeftsstelle hinzugefügt',
+                ]);
+            });
+
+            return response()->json(['message' => 'Eintrag erfolgreich hinzugefügt.'], 201);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Fehler beim Speichern', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * 2. BEARBEITEN (Update)
+     */
+    public function updateEntry(Request $request, $id)
+    {
+        $eintrag = Stundeneintrag::find($id);
+
+        if (!$eintrag) {
+            return response()->json(['message' => 'Eintrag nicht gefunden'], 404);
+        }
+
+        $validated = $request->validate([
+            'datum'         => 'required|date',
+            'beginn'        => 'required|date_format:H:i',
+            'ende'          => 'required|date_format:H:i|after:beginn',
+            'kurs'          => 'nullable|string',
+            'fk_abteilung'  => 'nullable|exists:abteilung_definition,AbteilungID',
+            // status_id ist hier optional, da der Status meist gleich bleibt ("In Abrechnung")
+        ]);
+
+        $start = Carbon::createFromFormat('H:i', $validated['beginn']);
+        $end   = Carbon::createFromFormat('H:i', $validated['ende']);
+        $dauer = $start->diffInMinutes($end) / 60;
+
+        try {
+            DB::transaction(function () use ($eintrag, $validated, $dauer, $request) {
+
+                $eintrag->update([
+                    'datum'        => $validated['datum'],
+                    'beginn'       => $validated['beginn'],
+                    'ende'         => $validated['ende'],
+                    'dauer'        => $dauer,
+                    'kurs'         => $validated['kurs'] ?? null,
+                    // Abteilung darf ggf. geändert werden
+                    'fk_abteilung' => $validated['fk_abteilung'] ?? $eintrag->fk_abteilung,
+                ]);
+
+                // Log schreiben (optional bei Edit, aber gut für Historie)
+                StundeneintragStatusLog::create([
+                    'fk_stundeneintragID' => $eintrag->EintragID,
+                    // Wir behalten den alten Status bei, oder nehmen einen neuen wenn gesendet
+                    'fk_statusID'         => $request->input('status_id', $eintrag->aktuellerStatusLog->fk_statusID ?? 11),
+                    'modifiedBy'          => Auth::id(),
+                    'modifiedAt'          => now(),
+                    'kommentar'           => 'Von Geschaeftsstelle korrigiert',
+                ]);
+            });
+
+            return response()->json(['message' => 'Eintrag aktualisiert.']);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Update fehlgeschlagen', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * 3. LÖSCHEN (Delete)
+     */
+    public function deleteEntry(Request $request, $id)
+    {
+        $eintrag = Stundeneintrag::find($id);
+
+        if (!$eintrag) {
+            return response()->json(['message' => 'Nicht gefunden'], 404);
+        }
+
+        try {
+            // Löschen (Logs werden via Cascade in DB gelöscht)
+            $eintrag->delete();
+            return response()->json(['message' => 'Eintrag gelöscht.']);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Löschen fehlgeschlagen', 'error' => $e->getMessage()], 500);
+        }
     }
 }
