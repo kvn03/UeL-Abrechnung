@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import type { VForm } from 'vuetify/components'
@@ -10,9 +10,7 @@ function goBack() {
   router.push({ name: 'Dashboard' })
 }
 
-// [BACKEND] API Base URL
 const API_BASE = 'http://127.0.0.1:8000/api'
-// WICHTIG: Hier zeigen wir auf den Geschäftsstellen-Controller
 const API_URL = `${API_BASE}/geschaeftsstelle/abrechnungen`
 
 // --- TYPES ---
@@ -29,9 +27,9 @@ interface TimesheetEntry {
 interface Submission {
   AbrechnungID: number
   mitarbeiterName: string
+  quartal: string
   zeitraum: string
   stunden: number
-  // GS spezifische Felder aus dem Controller:
   datumGenehmigtAL: string
   genehmigtDurch: string
   details: TimesheetEntry[]
@@ -44,22 +42,41 @@ const submissions = ref<Submission[]>([])
 const isProcessingId = ref<number | null>(null)
 const expandedIds = ref<number[]>([])
 
-// --- DIALOG STATE (Bearbeiten / Hinzufügen) ---
+// --- STATE: ABLEHNEN ---
+const showRejectDialog = ref(false)
+const rejectReason = ref('')
+const rejectLoading = ref(false)
+const idToReject = ref<number | null>(null)
+
+// --- DIALOG STATE ---
 const showDialog = ref(false)
 const isEditMode = ref(false)
 const dialogLoading = ref(false)
 const dialogForm = ref<VForm | null>(null)
 
-// Referenzen für Edit/Add
+// State für Änderungsprüfung
+const originalData = ref<any>(null)
+
 const currentSubmissionId = ref<number | null>(null)
 const currentEntryId = ref<number | null>(null)
 
-// Formular-Daten
 const formData = ref({
   datum: '',
   beginn: '',
   ende: '',
   kurs: ''
+})
+
+// --- COMPUTED: PRÜFUNG AUF ÄNDERUNGEN ---
+const hasChanges = computed(() => {
+  // Bei "Neu" (kein EditMode) ist immer eine Änderung da
+  if (!isEditMode.value) return true
+
+  // Wenn keine Originaldaten da sind, sicherheitshalber false
+  if (!originalData.value) return false
+
+  // Vergleich: Ist das JSON vom aktuellen Formular anders als das Original?
+  return JSON.stringify(formData.value) !== JSON.stringify(originalData.value)
 })
 
 // --- API: LADEN ---
@@ -84,10 +101,7 @@ async function approveSubmission(id: number) {
   isProcessingId.value = id
 
   try {
-    // Ruft 'finalize' im GeschaeftsstelleController auf
     await axios.post(`${API_URL}/${id}/finalize`)
-
-    // Erfolgreich -> Aus Liste entfernen
     submissions.value = submissions.value.filter(item => item.AbrechnungID !== id)
   } catch (error: any) {
     alert("Fehler: " + (error.response?.data?.message || "Unbekannter Fehler"))
@@ -96,15 +110,39 @@ async function approveSubmission(id: number) {
   }
 }
 
-// --- AKTION: LÖSCHEN (GS) ---
+// --- API: ABLEHNEN ---
+function openRejectDialog(id: number) {
+  idToReject.value = id
+  rejectReason.value = ''
+  showRejectDialog.value = true
+}
+
+async function submitRejection() {
+  if (!idToReject.value) return
+  if (!rejectReason.value || rejectReason.value.length < 5) {
+    alert("Bitte gib eine Begründung an (mind. 5 Zeichen).")
+    return
+  }
+  rejectLoading.value = true
+  try {
+    await axios.post(`${API_URL}/${idToReject.value}/reject`, {
+      grund: rejectReason.value
+    })
+    submissions.value = submissions.value.filter(item => item.AbrechnungID !== idToReject.value)
+    showRejectDialog.value = false
+    alert("Abrechnung wurde abgelehnt und zurückgewiesen.")
+  } catch (error: any) {
+    alert("Fehler beim Ablehnen: " + (error.response?.data?.message || error.message))
+  } finally {
+    rejectLoading.value = false
+  }
+}
+
+// --- AKTION: LÖSCHEN ---
 async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
   if (!confirm(`Eintrag vom ${entry.datum} wirklich löschen?`)) return
-
   try {
-    // WICHTIG: Pfad zum GS Controller
     await axios.delete(`${API_BASE}/geschaeftsstelle/stundeneintrag/${entry.EintragID}`)
-
-    // Lokal entfernen & Summe neu berechnen
     const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
     if (subIndex !== -1) {
       submissions.value[subIndex].details = submissions.value[subIndex].details.filter(e => e.EintragID !== entry.EintragID)
@@ -115,11 +153,10 @@ async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
   }
 }
 
-// --- HELPER: Summe neu berechnen ---
+// --- HELPER ---
 function recalculateTotal(submissionId: number) {
   const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
   if (subIndex === -1) return
-
   const total = submissions.value[subIndex].details.reduce((sum, entry) => sum + Number(entry.dauer), 0)
   submissions.value[subIndex].stunden = parseFloat(total.toFixed(2))
 }
@@ -130,13 +167,14 @@ function openAddDialog(submissionId: number) {
   currentSubmissionId.value = submissionId
   currentEntryId.value = null
 
-  // Reset Form
   formData.value = {
     datum: new Date().toISOString().split('T')[0],
     beginn: '',
     ende: '',
     kurs: ''
   }
+  // Bei Neu gibt es keine Originaldaten zum Vergleich
+  originalData.value = null
   showDialog.value = true
 }
 
@@ -145,7 +183,6 @@ function openEditDialog(entry: TimesheetEntry, submissionId: number) {
   isEditMode.value = true
   currentSubmissionId.value = submissionId
 
-  // ID-Fix: Fallback falls 'id' klein geschrieben kommt
   const id = entry.EintragID || (entry as any).id;
   currentEntryId.value = id;
 
@@ -154,24 +191,30 @@ function openEditDialog(entry: TimesheetEntry, submissionId: number) {
     return;
   }
 
-  // Datum/Zeit Formatierung
   const rawDate = entry.datum || '';
   const formattedDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
   const formatTime = (t: string) => (t && t.length >= 5) ? t.substring(0, 5) : '';
 
+  // 1. Formular befüllen
   formData.value = {
     datum: formattedDate,
     beginn: formatTime(entry.beginn),
     ende: formatTime(entry.ende),
-    // "-" entfernen, falls vom Backend kommend
     kurs: (entry.kurs === '-' || !entry.kurs) ? '' : entry.kurs
   }
+
+  // 2. Originalzustand speichern (Deep Copy)
+  originalData.value = JSON.parse(JSON.stringify(formData.value))
 
   showDialog.value = true
 }
 
-// --- AKTION: SPEICHERN (Create / Update via GS Controller) ---
+// --- AKTION: SPEICHERN ---
 async function saveEntry() {
+  // Sicherheitscheck: Wenn Button disabled ist, passiert eh nichts,
+  // aber wir fangen es hier ab, ohne Alert.
+  if (!hasChanges.value) return
+
   const { valid } = await dialogForm.value?.validate() || { valid: false }
   if (!valid) return
 
@@ -181,16 +224,14 @@ async function saveEntry() {
     const payload = {
       ...formData.value,
       fk_abrechnungID: currentSubmissionId.value,
-      status_id: 21 // Wir lassen den Status auf "AL Genehmigt", bis GS final klickt
+      status_id: 21
     }
 
     if (isEditMode.value) {
       if (!currentEntryId.value) throw new Error("ID fehlt");
-      // Update via GS Route
       await axios.put(`${API_BASE}/geschaeftsstelle/stundeneintrag/${currentEntryId.value}`, payload)
       alert("Eintrag aktualisiert")
     } else {
-      // Create via GS Route
       await axios.post(`${API_BASE}/geschaeftsstelle/stundeneintrag`, payload)
       alert("Eintrag hinzugefügt")
     }
@@ -207,7 +248,6 @@ async function saveEntry() {
   }
 }
 
-// Toggle logic
 function toggleDetails(id: number) {
   if (expandedIds.value.includes(id)) {
     expandedIds.value = expandedIds.value.filter(x => x !== id)
@@ -263,10 +303,15 @@ onMounted(() => {
                   <span class="label">Übungsleiter:</span>
                   <span class="value font-weight-bold">{{ item.mitarbeiterName }}</span>
                 </div>
+
                 <div class="line">
                   <span class="label">Zeitraum:</span>
-                  <span class="value">{{ item.zeitraum }}</span>
+                  <span class="value">
+                    <span class="font-weight-bold">{{ item.quartal }}</span>
+                    <span class="text-caption text-medium-emphasis ms-2">({{ item.zeitraum }})</span>
+                  </span>
                 </div>
+
                 <div class="line">
                   <span class="label">Gesamt:</span>
                   <span class="value font-weight-bold text-primary">
@@ -284,6 +329,17 @@ onMounted(() => {
 
               <div class="submission-actions">
                 <v-icon :icon="expandedIds.includes(item.AbrechnungID) ? 'mdi-chevron-up' : 'mdi-chevron-down'" class="mr-4 text-medium-emphasis"></v-icon>
+
+                <v-btn
+                    size="small"
+                    color="error"
+                    variant="text"
+                    class="mr-2"
+                    @click.stop="openRejectDialog(item.AbrechnungID)"
+                    prepend-icon="mdi-close"
+                >
+                  Ablehnen
+                </v-btn>
 
                 <v-btn
                     size="small"
@@ -369,19 +425,43 @@ onMounted(() => {
         <v-card-text>
           <v-form ref="dialogForm" @submit.prevent="saveEntry">
             <v-text-field v-model="formData.datum" label="Datum" type="date" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
-
             <div class="d-flex" style="gap: 12px;">
               <v-text-field v-model="formData.beginn" label="Beginn" type="time" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
               <v-text-field v-model="formData.ende" label="Ende" type="time" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
             </div>
-
             <v-text-field v-model="formData.kurs" label="Kurs / Tätigkeit" variant="outlined" density="comfortable" class="mb-3"></v-text-field>
           </v-form>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn color="grey" variant="text" @click="showDialog = false">Abbrechen</v-btn>
-          <v-btn color="primary" variant="flat" :loading="dialogLoading" @click="saveEntry">Speichern</v-btn>
+          <v-btn
+              color="primary"
+              variant="flat"
+              :loading="dialogLoading"
+              :disabled="!hasChanges"
+              @click="saveEntry"
+          >
+            Speichern
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="showRejectDialog" max-width="500px">
+      <v-card>
+        <v-card-title class="text-error">Abrechnung ablehnen</v-card-title>
+        <v-card-text>
+          <p class="text-body-2 mb-4">
+            Bitte gib eine Begründung an, warum diese Abrechnung von der Geschäftsstelle abgelehnt wird.
+            Der Status wird zurückgesetzt.
+          </p>
+          <v-textarea v-model="rejectReason" label="Begründung für Ablehnung" variant="outlined" auto-grow rows="3" :rules="[v => !!v || 'Begründung ist erforderlich']"></v-textarea>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn color="grey" variant="text" @click="showRejectDialog = false">Abbrechen</v-btn>
+          <v-btn color="error" variant="flat" :loading="rejectLoading" @click="submitRejection">Ablehnen</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -395,12 +475,9 @@ onMounted(() => {
   max-width: 800px;
   margin: 0 auto;
 }
-
-/* Grüner Rand oben für visuelle Unterscheidung */
 .border-t-lg-green {
   border-top: 4px solid #43A047;
 }
-
 .placeholder {
   min-height: 220px;
   display: flex;
@@ -415,14 +492,12 @@ onMounted(() => {
   padding: 16px;
   text-align: center;
 }
-
 .list {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-
 .submission-wrapper {
   background: white;
   border: 1px solid rgba(0,0,0,0.12);
@@ -430,11 +505,9 @@ onMounted(() => {
   overflow: hidden;
   transition: box-shadow 0.2s;
 }
-
 .submission-wrapper:hover {
   box-shadow: 0 4px 8px rgba(0,0,0,0.05);
 }
-
 .submission-row {
   display: flex;
   justify-content: space-between;
@@ -442,15 +515,12 @@ onMounted(() => {
   padding: 16px;
   cursor: pointer;
 }
-
 .submission-row:hover {
   background-color: #f9f9f9;
 }
-
 .submission-main {
   flex: 1;
 }
-
 .line {
   display: flex;
   gap: 8px;
@@ -459,25 +529,21 @@ onMounted(() => {
 .border-top {
   border-top: 1px solid rgba(0,0,0,0.08);
 }
-
 .label {
   min-width: 120px;
   font-weight: 500;
   color: rgba(0, 0, 0, 0.6);
   font-size: 0.9rem;
 }
-
 .value {
   font-weight: 400;
   color: rgba(0, 0, 0, 0.87);
 }
-
 .submission-actions {
   display: flex;
   align-items: center;
   margin-left: 24px;
 }
-
 .details-container {
   background-color: #fafafa;
   border-top: 1px solid rgba(0,0,0,0.06);

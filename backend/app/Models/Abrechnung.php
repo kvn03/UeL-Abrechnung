@@ -28,28 +28,26 @@ class Abrechnung extends Model
 
     /**
      * Laravel Timestamps Konfiguration.
-     * Da nur 'createdAt' existiert und kein 'updated_at', passen wir das an.
+     * Laut Diagramm gibt es 'createdAt', aber kein 'updatedAt'.
      */
     const CREATED_AT = 'createdAt';
-    const UPDATED_AT = null; // Deaktiviert updated_at
+    const UPDATED_AT = null;
 
     /**
      * Die Attribute, die massenweise zugewiesen werden können.
      */
     protected $fillable = [
-        'zeitraumVon',
-        'zeitraumBis',
+        'fk_quartal',   // Hinzugefügt statt zeitraumVon/Bis
         'fk_abteilung',
         'createdBy',
         'createdAt'
     ];
 
     /**
-     * Die Attribute, die als Datumsangaben behandelt werden sollen.
+     * Die Attribute, die gecastet werden sollen.
+     * 'zeitraumVon/Bis' entfernt, da nicht in dieser Tabelle.
      */
     protected $casts = [
-        'zeitraumVon' => 'date',
-        'zeitraumBis' => 'date',
         'createdAt' => 'datetime',
     ];
 
@@ -59,8 +57,17 @@ class Abrechnung extends Model
      */
 
     /**
+     * Das Quartal, zu dem die Abrechnung gehört.
+     * Hierüber erhältst du Zugriff auf 'beginn' und 'ende'.
+     */
+    public function quartal(): BelongsTo
+    {
+        // Annahme: Das Model heißt 'Quartal' und der PK dort ist 'ID'
+        return $this->belongsTo(Quartal::class, 'fk_quartal', 'ID');
+    }
+
+    /**
      * Die Abteilung, zu der die Abrechnung gehört.
-     * Annahme: Model heißt 'AbteilungDefinition'
      */
     public function abteilung(): BelongsTo
     {

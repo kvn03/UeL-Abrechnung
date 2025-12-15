@@ -7,8 +7,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Stundeneintrag;
 use App\Models\Abrechnung;
-use App\Models\AbrechnungStatusLog; // Das neue Model für das Abrechnungs-Log
+use App\Models\AbrechnungStatusLog;
 use App\Models\StundeneintragStatusLog;
+use App\Models\Quartal; // <--- WICHTIG: Quartal importieren
 
 class AbrechnungController extends Controller
 {
@@ -27,7 +28,6 @@ class AbrechnungController extends Controller
         $ids = $validated['stundeneintrag_ids'];
 
         // 2. Einträge laden
-        // Wir holen nur Einträge, die noch keiner Abrechnung zugeordnet sind (fk_abrechnungID is null)
         $eintraege = Stundeneintrag::whereIn('EintragID', $ids)
             ->where('createdBy', $userId)
             ->whereNull('fk_abrechnungID')
@@ -39,62 +39,76 @@ class AbrechnungController extends Controller
             ], 422);
         }
 
-        // 3. Metadaten für die Abrechnung ermitteln
-        // Da die Tabelle 'abrechnung' kein Feld 'summe_stunden' hat, speichern wir das nicht (oder berechnen es on-the-fly).
-        // Aber wir brauchen zeitraumVon, zeitraumBis und die Abteilung.
-
+        // 3. Quartal ermitteln
+        // Wir nehmen das Datum des ersten Eintrags, um das Quartal zu finden.
         $minDatum = $eintraege->min('datum');
         $maxDatum = $eintraege->max('datum');
 
-        // Wir nehmen an, alle Einträge gehören zur selben Abteilung. Wir nehmen die vom ersten Eintrag.
+        // Suche das Quartal in der DB, das dieses Datum abdeckt
+        $quartal = Quartal::where('beginn', '<=', $minDatum)
+            ->where('ende', '>=', $minDatum)
+            ->first();
+
+        if (!$quartal) {
+            return response()->json([
+                'message' => 'Für das Datum ' . $minDatum->format('d.m.Y') . ' wurde kein Quartal im System gefunden.'
+            ], 422);
+        }
+
+        // Optional: Sicherheitscheck - Liegen alle Einträge im selben Quartal?
+        if ($maxDatum > $quartal->ende) {
+            return response()->json([
+                'message' => 'Die ausgewählten Einträge erstrecken sich über mehrere Quartale. Bitte nur Einträge eines Quartals wählen.'
+            ], 422);
+        }
+
         $abteilungId = $eintraege->first()->fk_abteilung;
 
-        // IDs für Status definieren (Beispielwerte - musst du an deine status_definition Tabelle anpassen)
-        $statusIdNeu = 20; // z.B. "Neu" oder "Eingereicht"
-        $statusIdEintragInAbrechnung = 11; // Status für den Stundeneintrag
+        // IDs für Status (Annahme)
+        $statusIdNeu = 20;
+        $statusIdEintragInAbrechnung = 11;
 
         try {
-            DB::transaction(function () use ($eintraege, $minDatum, $maxDatum, $abteilungId, $userId, $statusIdNeu, $statusIdEintragInAbrechnung) {
+            DB::transaction(function () use ($eintraege, $quartal, $abteilungId, $userId, $statusIdNeu, $statusIdEintragInAbrechnung) {
 
-                // A. Abrechnung erstellen
+                // A. Abrechnung erstellen (Jetzt mit fk_quartal statt Datum)
                 $abrechnung = Abrechnung::create([
-                    'zeitraumVon'  => $minDatum,
-                    'zeitraumBis'  => $maxDatum,
+                    'fk_quartal'   => $quartal->ID, // <--- HIER GEÄNDERT
                     'fk_abteilung' => $abteilungId,
                     'createdBy'    => $userId,
-                    // 'createdAt' wird durch timestamps/Model automatisch gesetzt
                 ]);
 
-                // B. Abrechnung Log schreiben (DAS WAR DEIN WUNSCH)
+                // B. Abrechnung Log schreiben
+                // (Falls du keine Observer nutzt, bleibt das hier drin)
                 AbrechnungStatusLog::create([
-                    'fk_abrechnungID' => $abrechnung->AbrechnungID, // Wichtig: Primary Key nutzen
+                    'fk_abrechnungID' => $abrechnung->AbrechnungID,
                     'fk_statusID'     => $statusIdNeu,
                     'modifiedBy'      => $userId,
                     'modifiedAt'      => now(),
-                    'kommentar'       => 'Abrechnung initial erstellt.'
+                    'kommentar'       => 'Abrechnung für ' . $quartal->bezeichnung . ' erstellt.'
                 ]);
 
-                // C. Stundeneinträge aktualisieren und loggen
+                // C. Stundeneinträge aktualisieren
                 foreach ($eintraege as $eintrag) {
-
-                    // Verknüpfung herstellen
                     $eintrag->update([
                         'fk_abrechnungID' => $abrechnung->AbrechnungID
                     ]);
 
-                    // Log für den Stundeneintrag schreiben
+                    // Hinweis: Wenn du im Stundeneintrag Model den 'updated' Observer hast,
+                    // wird das Log eventuell doppelt geschrieben. Wenn nicht, lass es hier stehen.
                     StundeneintragStatusLog::create([
                         'fk_stundeneintragID' => $eintrag->EintragID,
                         'fk_statusID'         => $statusIdEintragInAbrechnung,
                         'modifiedBy'          => $userId,
                         'modifiedAt'          => now(),
-                        'kommentar'           => 'Zu Abrechnung #' . $abrechnung->AbrechnungID . ' hinzugefügt.',
+                        'kommentar'           => 'In Abrechnung #' . $abrechnung->AbrechnungID . ' aufgenommen.',
                     ]);
                 }
             });
 
             return response()->json([
                 'message' => 'Abrechnung erfolgreich erstellt.',
+                'quartal' => $quartal->bezeichnung,
                 'anzahl_eintraege' => $eintraege->count(),
             ], 201);
 
@@ -110,29 +124,34 @@ class AbrechnungController extends Controller
     {
         $userId = Auth::id();
 
-        // 1. Alle Abrechnungen des Users laden
-        // Wir sortieren nach Erstellungsdatum absteigend (neueste oben)
         $abrechnungen = Abrechnung::where('createdBy', $userId)
             ->with([
-                'stundeneintraege', // Für die Summe der Stunden
-                'statusLogs.statusDefinition' // Für den Status-Text
+                'quartal',            // <--- WICHTIG: Relation laden
+                'stundeneintraege',
+                'statusLogs.statusDefinition'
             ])
             ->orderBy('createdAt', 'desc')
             ->get();
 
-        // 2. Daten formatieren
         $result = $abrechnungen->map(function($a) {
-            // Aktueller Status ist der neueste Log-Eintrag
             $neuestesLog = $a->statusLogs->sortByDesc('modifiedAt')->first();
             $statusName = $neuestesLog ? $neuestesLog->statusDefinition->name : 'Unbekannt';
             $statusId   = $neuestesLog ? $neuestesLog->fk_statusID : 0;
 
+            // Zeitraum kommt jetzt aus dem Quartal Model
+            $zeitraumString = 'Unbekannt';
+            if ($a->quartal) {
+                // Zugriff auf Carbon Objekte dank Casts im Model
+                $zeitraumString = $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y');
+            }
+
             return [
                 'id' => $a->AbrechnungID,
-                'zeitraum' => \Carbon\Carbon::parse($a->zeitraumVon)->format('d.m.Y') . ' - ' . \Carbon\Carbon::parse($a->zeitraumBis)->format('d.m.Y'),
+                'zeitraum' => $zeitraumString, // <--- Angepasst
+                'quartal_name' => $a->quartal ? $a->quartal->bezeichnung : 'N/A', // Optional, falls du "Q1 2024" anzeigen willst
                 'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
                 'status' => $statusName,
-                'status_id' => $statusId, // Für Farben im Frontend
+                'status_id' => $statusId,
                 'datum_erstellt' => $a->createdAt->format('d.m.Y'),
             ];
         });

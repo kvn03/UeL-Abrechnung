@@ -34,12 +34,12 @@ return new class extends Migration
         });
 
 
-        Schema::create('lizenzen_definition', function (Blueprint $table) {
+        /*Schema::create('lizenzen_definition', function (Blueprint $table) {
             $table->id('LizenzID');
             $table->string('art');
             $table->double('standardstundensatz');
             $table->timestamps();
-        });
+        });*/
 
 
 

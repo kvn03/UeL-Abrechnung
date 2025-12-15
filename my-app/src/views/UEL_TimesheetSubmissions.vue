@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue' // 'computed' importieren
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -9,13 +9,13 @@ function goBack() {
   router.push({ name: 'Dashboard' })
 }
 
-// URL zum neuen Endpoint
 const API_URL = 'http://127.0.0.1:8000/api/abrechnung/meine'
 
-// Interface für eine Abrechnung in der Liste
+// Interface angepasst an die Controller-Antwort
 interface Submission {
   id: number
   zeitraum: string
+  quartal_name: string // <--- NEU: Vom Controller hinzugefügt
   stunden: number
   status: string
   status_id: number
@@ -25,6 +25,7 @@ interface Submission {
 const isLoading = ref<boolean>(false)
 const errorMessage = ref<string | null>(null)
 const submissions = ref<Submission[]>([])
+const selectedQuarter = ref<string | null>(null) // <--- NEU: State für den Filter
 
 // Daten laden
 async function fetchSubmissions() {
@@ -43,13 +44,31 @@ async function fetchSubmissions() {
   }
 }
 
-// Hilfsfunktion: Farbe basierend auf Status-ID (Beispiel-Logik)
+// --- FILTER LOGIK ---
+
+// 1. Extrahiere alle eindeutigen Quartals-Namen für das Dropdown
+const availableQuarters = computed(() => {
+  // Set filtert Duplikate raus
+  const quarters = new Set(submissions.value.map(s => s.quartal_name).filter(Boolean))
+  // In Array umwandeln und sortieren (Neueste zuerst oder alphabetisch)
+  return Array.from(quarters).sort().reverse()
+})
+
+// 2. Filter die Liste basierend auf der Auswahl
+const filteredSubmissions = computed(() => {
+  if (!selectedQuarter.value) {
+    return submissions.value // Keine Auswahl -> Alles anzeigen
+  }
+  return submissions.value.filter(s => s.quartal_name === selectedQuarter.value)
+})
+
+// --- HELPER ---
+
 function getStatusColor(statusId: number): string {
-  // IDs basierend auf deinem System (10=Offen, 11=Eingereicht, 21=AL genehmigt, 22=GS genehmigt)
-  if (statusId === 10) return 'grey'            // Offen / Entwurf
-  if (statusId === 11) return 'blue'            // Eingereicht
-  if (statusId === 21) return 'orange-darken-1' // AL Freigabe (Teilweise fertig)
-  if (statusId === 22) return 'green'           // GS Freigabe (Fertig)
+  if (statusId === 10) return 'grey'
+  if (statusId === 11) return 'blue'
+  if (statusId === 21) return 'orange-darken-1'
+  if (statusId === 22) return 'green'
   return 'grey-darken-1'
 }
 
@@ -96,18 +115,39 @@ onMounted(() => {
         </v-alert>
 
         <div v-else-if="submissions.length > 0">
+
+          <v-row class="mb-2" dense>
+            <v-col cols="12" sm="6" md="4">
+              <v-select
+                  v-model="selectedQuarter"
+                  :items="availableQuarters"
+                  label="Nach Quartal filtern"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  clearable
+                  placeholder="Alle Quartale anzeigen"
+              ></v-select>
+            </v-col>
+            <v-col cols="12" sm="6" md="8" class="d-flex align-center justify-end">
+              <span class="text-caption text-medium-emphasis" v-if="selectedQuarter">
+                Zeige {{ filteredSubmissions.length }} von {{ submissions.length }} Einträgen
+              </span>
+            </v-col>
+          </v-row>
           <v-table density="comfortable" hover>
             <thead>
             <tr>
-              <th class="text-left">Zeitraum</th>
+              <th class="text-left">Quartal</th> <th class="text-left">Zeitraum</th>
               <th class="text-left">Eingereicht am</th>
               <th class="text-right">Stunden</th>
               <th class="text-center">Status</th>
             </tr>
             </thead>
             <tbody>
-            <tr v-for="item in submissions" :key="item.id">
-              <td class="font-weight-medium">{{ item.zeitraum }}</td>
+            <tr v-for="item in filteredSubmissions" :key="item.id">
+              <td class="font-weight-bold text-primary">{{ item.quartal_name }}</td>
+              <td class="text-medium-emphasis">{{ item.zeitraum }}</td>
               <td class="text-medium-emphasis">{{ item.datum_erstellt }}</td>
               <td class="text-right">{{ item.stunden.toLocaleString('de-DE') }} Std.</td>
               <td class="text-center">
@@ -123,6 +163,11 @@ onMounted(() => {
             </tr>
             </tbody>
           </v-table>
+
+          <div v-if="filteredSubmissions.length === 0" class="text-center py-4 text-medium-emphasis">
+            Keine Abrechnungen für das ausgewählte Quartal gefunden.
+          </div>
+
         </div>
 
         <div v-else class="placeholder">
@@ -137,7 +182,7 @@ onMounted(() => {
 <style scoped>
 .page {
   padding: 24px;
-  max-width: 800px; /* Etwas breiter für die Tabelle */
+  max-width: 900px; /* Etwas breiter gemacht für die zusätzliche Spalte */
   margin: 0 auto;
 }
 

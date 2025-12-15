@@ -14,8 +14,12 @@ return new class extends Migration
         // 1. Tabelle: abrechnung
         Schema::create('abrechnung', function (Blueprint $table) {
             $table->integer('AbrechnungID')->autoIncrement(); // Primary Key
-            $table->date('zeitraumVon')->nullable();
-            $table->date('zeitraumBis')->nullable();
+            // Bezug zum Quartal
+            $table->unsignedBigInteger('fk_quartal');
+            $table->foreign('fk_quartal')
+                ->references('ID')
+                ->on('quartal')
+                ->onDelete('cascade');
 
             // Foreign Keys
             // Hinweis: Im Diagramm heißt die Spalte fk_abteilung.

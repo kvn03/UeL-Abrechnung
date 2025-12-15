@@ -4,7 +4,21 @@ import { useRouter } from 'vue-router'
 import axios from 'axios'
 import type { VForm } from 'vuetify/components'
 
+// Importiere 'computed' falls noch nicht geschehen: import { ref, computed, ... } from 'vue'
+
+const hasChanges = computed(() => {
+  // Wenn wir im "Neu"-Modus sind, erlauben wir das Speichern immer (sofern Validierung passt)
+  if (!isEditMode.value) return true
+
+  // Wenn noch keine Originaldaten geladen sind
+  if (!originalData.value) return false
+
+  // Wir vergleichen einfach die JSON-Strings der beiden Objekte
+  return JSON.stringify(formData.value) !== JSON.stringify(originalData.value)
+})
 const router = useRouter()
+// Oben bei den anderen Refs hinzufügen
+const originalData = ref<any>(null)
 
 function goBack() {
   router.push({ name: 'Dashboard' })
@@ -15,7 +29,7 @@ const API_URL = `${API_BASE}/abteilungsleiter/abrechnungen`
 
 // --- TYPES ---
 interface TimesheetEntry {
-  EintragID: number // WICHTIG: ID wird für Edit/Delete benötigt
+  EintragID: number
   datum: string
   beginn: string
   ende: string
@@ -27,6 +41,7 @@ interface TimesheetEntry {
 interface Submission {
   AbrechnungID: number
   mitarbeiterName: string
+  quartal: string       // <--- NEU
   zeitraum: string
   stunden: number
   datumEingereicht: string
@@ -40,17 +55,21 @@ const submissions = ref<Submission[]>([])
 const isProcessingId = ref<number | null>(null)
 const expandedIds = ref<number[]>([])
 
+// --- STATE: ABLEHNEN (NEU) ---
+const showRejectDialog = ref(false)
+const rejectReason = ref('')
+const rejectLoading = ref(false)
+const idToReject = ref<number | null>(null)
+
 // --- DIALOG STATE (Bearbeiten / Hinzufügen) ---
 const showDialog = ref(false)
 const isEditMode = ref(false)
 const dialogLoading = ref(false)
 const dialogForm = ref<VForm | null>(null)
 
-// Wir merken uns, zu welcher Abrechnung wir gerade etwas hinzufügen/bearbeiten
 const currentSubmissionId = ref<number | null>(null)
-const currentEntryId = ref<number | null>(null) // Nur bei Edit
+const currentEntryId = ref<number | null>(null)
 
-// Formular-Daten
 const formData = ref({
   datum: '',
   beginn: '',
@@ -89,8 +108,41 @@ async function approveSubmission(id: number) {
   }
 }
 
+// --- API: ABLEHNEN (NEU) ---
+function openRejectDialog(id: number) {
+  idToReject.value = id
+  rejectReason.value = ''
+  showRejectDialog.value = true
+}
+
+async function submitRejection() {
+  if (!idToReject.value) return
+  if (!rejectReason.value || rejectReason.value.length < 5) {
+    alert("Bitte gib eine Begründung an (mind. 5 Zeichen).")
+    return
+  }
+
+  rejectLoading.value = true
+
+  try {
+    // POST Request an den Endpoint, den wir im Controller definiert haben
+    await axios.post(`${API_URL}/${idToReject.value}/reject`, {
+      grund: rejectReason.value
+    })
+
+    // Entfernen aus der Liste
+    submissions.value = submissions.value.filter(item => item.AbrechnungID !== idToReject.value)
+    showRejectDialog.value = false
+    alert("Abrechnung wurde abgelehnt.")
+
+  } catch (error: any) {
+    alert("Fehler beim Ablehnen: " + (error.response?.data?.message || error.message))
+  } finally {
+    rejectLoading.value = false
+  }
+}
+
 // --- HELPER: Summe neu berechnen ---
-// Wenn wir Zeilen ändern/löschen, muss die Gesamtsumme der Abrechnung aktualisiert werden
 function recalculateTotal(submissionId: number) {
   const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
   if (subIndex === -1) return
@@ -106,7 +158,6 @@ async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
   try {
     await axios.delete(`${API_BASE}/abteilungsleiter/stundeneintrag/${entry.EintragID}`)
 
-    // Lokal entfernen
     const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
     if (subIndex !== -1) {
       submissions.value[subIndex].details = submissions.value[subIndex].details.filter(e => e.EintragID !== entry.EintragID)
@@ -123,9 +174,8 @@ function openAddDialog(submissionId: number) {
   currentSubmissionId.value = submissionId
   currentEntryId.value = null
 
-  // Formular reset
   formData.value = {
-    datum: new Date().toISOString().split('T')[0], // Heute
+    datum: new Date().toISOString().split('T')[0],
     beginn: '',
     ende: '',
     kurs: ''
@@ -134,32 +184,23 @@ function openAddDialog(submissionId: number) {
 }
 
 // --- AKTION: ÖFFNEN (Bearbeiten) ---
-// --- AKTION: ÖFFNEN (Bearbeiten) ---
 function openEditDialog(entry: TimesheetEntry, submissionId: number) {
-  // Debugging: Schau in die Browser-Konsole (F12), was hier ausgegeben wird
-  console.log("Öffne Edit für:", entry);
-
   isEditMode.value = true
   currentSubmissionId.value = submissionId
 
-  // WICHTIG: Wir prüfen auf 'EintragID' UND 'id'.
-  // Laravel sendet manchmal 'id' im JSON, auch wenn die DB-Spalte anders heißt.
   const id = entry.EintragID || (entry as any).id;
   currentEntryId.value = id;
 
   if (!id) {
-    alert("Fehler: Keine ID für diesen Eintrag gefunden. Bearbeiten wird nicht funktionieren.");
-    console.error("ID fehlt im Objekt:", entry);
+    alert("Fehler: Keine ID gefunden.");
+    return;
   }
 
-  // Datum und Zeit sicher formatieren
-  // Datum auf YYYY-MM-DD kürzen (ersten 10 Zeichen)
   const rawDate = entry.datum || '';
   const formattedDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
-
-  // Zeit auf HH:mm kürzen (ersten 5 Zeichen)
   const formatTime = (t: string) => (t && t.length >= 5) ? t.substring(0, 5) : '';
 
+  // 1. Formular befüllen
   formData.value = {
     datum: formattedDate,
     beginn: formatTime(entry.beginn),
@@ -167,11 +208,14 @@ function openEditDialog(entry: TimesheetEntry, submissionId: number) {
     kurs: entry.kurs || ''
   }
 
+  // 2. WICHTIG: Original-Daten als Kopie speichern!
+  // Wir nutzen JSON parse/stringify für eine tiefe Kopie, damit keine Referenz bleibt
+  originalData.value = JSON.parse(JSON.stringify(formData.value))
+
   showDialog.value = true
 }
 
-// --- AKTION: SPEICHERN (Create / Update) ---
-// --- AKTION: SPEICHERN (Create / Update) ---
+// --- AKTION: SPEICHERN ---
 async function saveEntry() {
   const { valid } = await dialogForm.value?.validate() || { valid: false }
   if (!valid) return
@@ -182,42 +226,29 @@ async function saveEntry() {
     const payload = {
       ...formData.value,
       fk_abrechnungID: currentSubmissionId.value,
-      status_id: 11 // Status: Eingereicht / In Prüfung
+      status_id: 11
     }
 
-    // Entscheidung: Update oder Neu?
     if (isEditMode.value) {
-      // SICHERHEITSPRÜFUNG
-      if (!currentEntryId.value) {
-        throw new Error("Fehler: ID verloren gegangen. Kann nicht speichern.");
-      }
-
-      // UPDATE (PUT)
+      if (!currentEntryId.value) throw new Error("ID fehlt.");
       await axios.put(`${API_BASE}/abteilungsleiter/stundeneintrag/${currentEntryId.value}`, payload)
-      alert("Eintrag erfolgreich aktualisiert")
+      alert("Eintrag aktualisiert")
     } else {
-      // CREATE (POST)
       await axios.post(`${API_BASE}/abteilungsleiter/stundeneintrag`, payload)
-      alert("Eintrag erfolgreich hinzugefügt")
+      alert("Eintrag hinzugefügt")
     }
 
-    // Liste neu laden
     await fetchReleaseSubmissions()
     showDialog.value = false
 
   } catch (error: any) {
-    console.error(error)
-    let msg = error.response?.data?.message || error.message || 'Fehler beim Speichern'
-    if (error.response?.data?.errors) {
-      msg += '\n' + JSON.stringify(error.response.data.errors)
-    }
+    let msg = error.response?.data?.message || error.message || 'Fehler'
     alert(msg)
   } finally {
     dialogLoading.value = false
   }
 }
 
-// Toggle logic
 function toggleDetails(id: number) {
   if (expandedIds.value.includes(id)) {
     expandedIds.value = expandedIds.value.filter(x => x !== id)
@@ -226,7 +257,6 @@ function toggleDetails(id: number) {
   }
 }
 
-// Validation Rules
 const requiredRule = [(v: any) => !!v || 'Pflichtfeld']
 
 onMounted(() => {
@@ -276,7 +306,8 @@ onMounted(() => {
                 </div>
                 <div class="line">
                   <span class="label">Zeitraum:</span>
-                  <span class="value">{{ item.zeitraum }}</span>
+                  <span class="font-weight-bold">{{ item.quartal }}</span>
+                  <span class="text-caption text-medium-emphasis ms-2">({{ item.zeitraum }})</span>
                 </div>
                 <div class="line">
                   <span class="label">Gesamt:</span>
@@ -288,6 +319,18 @@ onMounted(() => {
 
               <div class="submission-actions">
                 <v-icon :icon="expandedIds.includes(item.AbrechnungID) ? 'mdi-chevron-up' : 'mdi-chevron-down'" class="mr-4 text-medium-emphasis"></v-icon>
+
+                <v-btn
+                    size="small"
+                    color="error"
+                    variant="text"
+                    class="mr-2"
+                    @click.stop="openRejectDialog(item.AbrechnungID)"
+                    prepend-icon="mdi-close"
+                >
+                  Ablehnen
+                </v-btn>
+
                 <v-btn
                     size="small"
                     color="success"
@@ -413,17 +456,43 @@ onMounted(() => {
             ></v-text-field>
           </v-form>
         </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn color="grey" variant="text" @click="showDialog = false">Abbrechen</v-btn>
+
+            <v-btn
+                color="primary"
+                variant="flat"
+                :loading="dialogLoading"
+                :disabled="!hasChanges"
+                @click="saveEntry"
+            >
+              Speichern
+            </v-btn>
+          </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="showRejectDialog" max-width="500px">
+      <v-card>
+        <v-card-title class="text-error">Abrechnung ablehnen</v-card-title>
+        <v-card-text>
+          <p class="text-body-2 mb-4">
+            Bitte gib eine Begründung an, warum diese Abrechnung abgelehnt wird.
+          </p>
+          <v-textarea
+              v-model="rejectReason"
+              label="Begründung / Korrekturwünsche"
+              variant="outlined"
+              auto-grow
+              rows="3"
+              :rules="[v => !!v || 'Begründung ist erforderlich']"
+          ></v-textarea>
+        </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn color="grey" variant="text" @click="showDialog = false">Abbrechen</v-btn>
-          <v-btn
-              color="primary"
-              variant="flat"
-              :loading="dialogLoading"
-              @click="saveEntry"
-          >
-            Speichern
-          </v-btn>
+          <v-btn color="grey" variant="text" @click="showRejectDialog = false">Abbrechen</v-btn>
+          <v-btn color="error" variant="flat" :loading="rejectLoading" @click="submitRejection">Ablehnen</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

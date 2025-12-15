@@ -44,6 +44,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('/geschaeftsstelle/stundeneintrag', [GeschaeftsstelleController::class, 'addEntry']);
         Route::put('/geschaeftsstelle/stundeneintrag/{id}', [GeschaeftsstelleController::class, 'updateEntry']);
         Route::delete('/geschaeftsstelle/stundeneintrag/{id}', [GeschaeftsstelleController::class, 'deleteEntry']);
+        Route::post('/geschaeftsstelle/abrechnungen/{id}/reject', [GeschaeftsstelleController::class, 'reject']);
     });
     //Abteilungsleiter-Routen
     Route::group(['middleware' => ['al']], function ()
@@ -53,6 +54,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('/abteilungsleiter/stundeneintrag', [AbteilungsleiterController::class, 'addEntry']);
         Route::put('/abteilungsleiter/stundeneintrag/{id}', [AbteilungsleiterController::class, 'updateEntry']);
         Route::delete('/abteilungsleiter/stundeneintrag/{id}', [AbteilungsleiterController::class, 'deleteEntry']);
+        Route::post('/abteilungsleiter/abrechnungen/{id}/reject', [AbteilungsleiterController::class, 'reject']);
     });
     //Admin-Routen
     Route::group(['middleware' => ['admin']], function ()

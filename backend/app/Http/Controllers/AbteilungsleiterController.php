@@ -6,6 +6,7 @@ use App\Models\Abrechnung;
 use Illuminate\Http\Request;
 use App\Models\Stundeneintrag;
 use App\Models\StundeneintragStatusLog;
+use App\Models\StundeneintragAuditLog; // <--- Hinzufügen
 use App\Models\UserRolleAbteilung;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -60,6 +61,9 @@ class AbteilungsleiterController extends Controller
         // Wir laden die Abrechnung, um zu sehen, wem sie gehört.
         $abrechnung = Abrechnung::findOrFail($validated['fk_abrechnungID']);
         $uelId = $abrechnung->createdBy; // Das ist die ID des Übungsleiters
+        // NEU: Wir holen die Abteilungs-ID direkt aus der Abrechnung,
+        // falls sie im Request nicht explizit drin war.
+        $abteilungId = $abrechnung->fk_abteilung;
 
         // Dauer berechnen
         $start = Carbon::createFromFormat('H:i', $validated['beginn']);
@@ -68,7 +72,7 @@ class AbteilungsleiterController extends Controller
 
         try {
             // Variable $uelId an die Closure übergeben ('use')
-            DB::transaction(function () use ($validated, $dauer, $uelId) {
+            DB::transaction(function () use ($validated, $dauer, $uelId, $abteilungId) {
                 // Eintrag erstellen
                 $eintrag = Stundeneintrag::create([
                     'datum'           => $validated['datum'],
@@ -76,7 +80,7 @@ class AbteilungsleiterController extends Controller
                     'ende'            => $validated['ende'],
                     'dauer'           => $dauer,
                     'kurs'            => $validated['kurs'] ?? null,
-                    'fk_abteilung'    => $validated['fk_abteilung'] ?? null,
+                    'fk_abteilung'    => $validated['fk_abteilung'] ?? $abteilungId,
                     'fk_abrechnungID' => $validated['fk_abrechnungID'],
 
                     // ÄNDERUNG: Hier setzen wir den Übungsleiter als Besitzer
@@ -105,6 +109,9 @@ class AbteilungsleiterController extends Controller
     /**
      * 2. BEARBEITEN (Update)
      */
+    /**
+     * 2. BEARBEITEN (Update) mit Audit-Log
+     */
     public function updateEntry(Request $request, $id)
     {
         $eintrag = Stundeneintrag::find($id);
@@ -113,8 +120,7 @@ class AbteilungsleiterController extends Controller
             return response()->json(['message' => 'Eintrag nicht gefunden'], 404);
         }
 
-        // Berechtigungsprüfung: Ist User AL dieser Abteilung?
-        // (Falls der Eintrag keine Abteilung hat, müsste man prüfen ob er AL der Abrechnung ist)
+        // Berechtigungsprüfung
         if ($eintrag->fk_abteilung) {
             if (!$this->isAbteilungsleiter($request, $eintrag->fk_abteilung)) {
                 return response()->json(['message' => 'Keine Berechtigung (Kein AL dieser Abteilung).'], 403);
@@ -123,13 +129,13 @@ class AbteilungsleiterController extends Controller
 
         $validated = $request->validate([
             'datum'         => 'required|date',
-            'beginn'        => 'required|date_format:H:i',
+            'beginn'        => 'required|date_format:H:i', // Format H:i reicht für Input
             'ende'          => 'required|date_format:H:i|after:beginn',
             'kurs'          => 'nullable|string',
             'fk_abteilung'  => 'nullable|exists:abteilung_definition,AbteilungID',
-            // status_id ist hier optional, da der Status meist gleich bleibt ("In Abrechnung")
         ]);
 
+        // Dauer berechnen
         $start = Carbon::createFromFormat('H:i', $validated['beginn']);
         $end   = Carbon::createFromFormat('H:i', $validated['ende']);
         $dauer = $start->diffInMinutes($end) / 60;
@@ -137,25 +143,86 @@ class AbteilungsleiterController extends Controller
         try {
             DB::transaction(function () use ($eintrag, $validated, $dauer, $request) {
 
-                $eintrag->update([
+                // 1. Neue Werte erst einmal "befüllen" (aber noch nicht speichern!)
+                //    Wir formatieren die Zeiten auf H:i:s, damit der Vergleich mit der DB sauber klappt
+                $eintrag->fill([
                     'datum'        => $validated['datum'],
-                    'beginn'       => $validated['beginn'],
+                    'beginn'       => $validated['beginn'], // Ggf. . ':00' anhängen, falls DB H:i:s erwartet
                     'ende'         => $validated['ende'],
                     'dauer'        => $dauer,
                     'kurs'         => $validated['kurs'] ?? null,
-                    // Abteilung darf ggf. geändert werden
                     'fk_abteilung' => $validated['fk_abteilung'] ?? $eintrag->fk_abteilung,
                 ]);
 
-                // Log schreiben (optional bei Edit, aber gut für Historie)
-                StundeneintragStatusLog::create([
-                    'fk_stundeneintragID' => $eintrag->EintragID,
-                    // Wir behalten den alten Status bei, oder nehmen einen neuen wenn gesendet
-                    'fk_statusID'         => $request->input('status_id', $eintrag->aktuellerStatusLog->fk_statusID ?? 11),
-                    'modifiedBy'          => Auth::id(),
-                    'modifiedAt'          => now(),
-                    'kommentar'           => 'Vom Abteilungsleiter korrigiert',
-                ]);
+                // 2. Prüfen, was sich geändert hat
+                if ($eintrag->isDirty()) {
+
+                    // Array der geänderten Felder (Feldname => Neuer Wert)
+                    $changes = $eintrag->getDirty();
+                    // Die Originalwerte vor dem fill()
+                    $original = $eintrag->getOriginal();
+
+                    // 3. Eintrag speichern
+                    $eintrag->save();
+
+                    // 4. Audit Logs schreiben für jedes geänderte Feld
+                    // ... (innerhalb von updateEntry, nach $eintrag->save()) ...
+
+                    // 4. Audit Logs schreiben (MIT VERGLEICHS-LOGIK)
+                    foreach ($changes as $field => $newValue) {
+
+                        // Ignorieren: Systemfelder
+                        if ($field === 'updated_at') continue;
+
+                        $oldValue = $original[$field] ?? null;
+
+                        // --- FIX: Werte normalisieren für den Vergleich ---
+
+                        // 1. Datum: Falls alter Wert ein Objekt ist (Carbon), mach einen String draus
+                        if ($oldValue instanceof \DateTimeInterface) {
+                            $oldValue = $oldValue->format('Y-m-d');
+                        }
+
+                        // 2. Uhrzeit: Wir vergleichen nur die ersten 5 Zeichen (10:00 vs 10:00:00)
+                        if (in_array($field, ['beginn', 'ende'])) {
+                            $t1 = substr((string)$oldValue, 0, 5);
+                            $t2 = substr((string)$newValue, 0, 5);
+
+                            // Wenn "10:00" == "10:00", überspringen wir das Loggen
+                            if ($t1 === $t2) continue;
+                        }
+
+                        // 3. Dauer: Float-Vergleich (gegen Rundungsfehler)
+                        if ($field === 'dauer') {
+                            // Wenn Differenz kleiner als 0.01 ist, betrachten wir es als gleich
+                            if (abs((float)$oldValue - (float)$newValue) < 0.01) continue;
+                        }
+
+                        // 4. Genereller Check (Loose Comparison fängt "1" == 1 ab)
+                        if ($oldValue == $newValue) continue;
+
+                        // --------------------------------------------------
+
+                        \App\Models\StundeneintragAuditLog::create([
+                            'fk_stundeneintragID' => $eintrag->EintragID,
+                            'feldname'            => $field,
+                            'alter_wert'          => (string)$oldValue,
+                            'neuer_wert'          => (string)$newValue,
+                            'modifiedBy'          => Auth::id(),
+                            'modifiedAt'          => now(),
+                            'kommentar'           => 'Korrektur durch AL'
+                        ]);
+                    }
+
+                    // 5. Status Log schreiben (Allgemeiner Hinweis, dass bearbeitet wurde)
+                    /*StundeneintragStatusLog::create([
+                        'fk_stundeneintragID' => $eintrag->EintragID,
+                        'fk_statusID'         => $request->input('status_id', $eintrag->aktuellerStatusLog->fk_statusID ?? 11),
+                        'modifiedBy'          => Auth::id(),
+                        'modifiedAt'          => now(),
+                        'kommentar'           => 'Bearbeitet (siehe Audit Log)',
+                    ]);*/
+                }
             });
 
             return response()->json(['message' => 'Eintrag aktualisiert.']);
@@ -165,8 +232,8 @@ class AbteilungsleiterController extends Controller
         }
     }
 
-    /**
-     * 3. LÖSCHEN (Delete)
+
+     /* 3. LÖSCHEN (Soft-Delete: Status auf 12 setzen)
      */
     public function deleteEntry(Request $request, $id)
     {
@@ -184,9 +251,38 @@ class AbteilungsleiterController extends Controller
         }
 
         try {
-            // Löschen (Logs werden via Cascade in DB gelöscht)
-            $eintrag->delete();
-            return response()->json(['message' => 'Eintrag gelöscht.']);
+            DB::transaction(function () use ($eintrag) {
+
+                // A. Audit Log schreiben (optional, aber gut für Historie)
+                // Wir protokollieren, dass der Eintrag aus der Abrechnung entfernt wurde.
+                \App\Models\StundeneintragAuditLog::create([
+                    'fk_stundeneintragID' => $eintrag->EintragID,
+                    'feldname'            => 'fk_abrechnungID',
+                    'alter_wert'          => (string)$eintrag->fk_abrechnungID,
+                    'neuer_wert'          => 'NULL', // Weil wir ihn gleich entkoppeln
+                    'modifiedBy'          => Auth::id(),
+                    'modifiedAt'          => now(),
+                    'kommentar'           => 'Eintrag gelöscht (Soft-Delete)'
+                ]);
+
+                // B. Verknüpfung zur Abrechnung entfernen
+                // Damit die Stunden nicht mehr zur Summe zählen und er aus der Liste verschwindet.
+                $eintrag->update([
+                    'fk_abrechnungID' => null
+                ]);
+
+                // C. Status auf 12 setzen (Dein Wunsch)
+                \App\Models\StundeneintragStatusLog::create([
+                    'fk_stundeneintragID' => $eintrag->EintragID,
+                    'fk_statusID'         => 12, // Status 12 = Gelöscht / Storniert
+                    'modifiedBy'          => Auth::id(),
+                    'modifiedAt'          => now(),
+                    'kommentar'           => 'Gelöscht durch Abteilungsleiter',
+                ]);
+            });
+
+            return response()->json(['message' => 'Eintrag wurde gelöscht (Status 12).']);
+
         } catch (\Exception $e) {
             return response()->json(['message' => 'Löschen fehlgeschlagen', 'error' => $e->getMessage()], 500);
         }
@@ -210,17 +306,19 @@ class AbteilungsleiterController extends Controller
             return response()->json([]);
         }
 
-        // 2. Abrechnungen laden
+        // 2. Abrechnungen laden (JETZT MIT QUARTAL)
         $abrechnungen = Abrechnung::whereIn('fk_abteilung', $managedAbteilungIds)
             ->with([
                 'creator',
                 'stundeneintraege',
+                'quartal', // <--- WICHTIG: Hier das Quartal mitladen
                 'statusLogs' => function($q) { $q->orderBy('modifiedAt', 'desc'); },
-                // 'statusLogs.statusDefinition' // Kannst du laden, wenn du den Status-Namen brauchst
             ])
             ->get();
 
         // 3. Filtern (Status 20 = Erstellt/Offen für AL)
+        // Hinweis: Prüfe kurz in deiner DB, ob Status 20 wirklich der ist,
+        // den die Abrechnung direkt nach dem Einreichen hat (manchmal ist es 11 oder ähnlich).
         $offeneAbrechnungen = $abrechnungen->filter(function($abrechnung) {
             $neuestesLog = $abrechnung->statusLogs->first();
             return $neuestesLog && $neuestesLog->fk_statusID == 20;
@@ -228,20 +326,35 @@ class AbteilungsleiterController extends Controller
 
         // 4. Daten formatieren
         $result = $offeneAbrechnungen->map(function($a) {
+
+            // --- NEU: Quartalsdaten sicher abrufen ---
+            $quartalName = 'Unbekannt';
+            $zeitraumString = 'Unbekannt';
+
+            if ($a->quartal) {
+                // Falls du den "getBezeichnungAttribute" Accessor im Model hast:
+                $quartalName = $a->quartal->bezeichnung;
+
+                // Zeitraum aus dem Quartal-Model holen
+                $zeitraumString = $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y');
+            }
+            // -----------------------------------------
+
             return [
-                'AbrechnungID' => $a->AbrechnungID, // Wichtig für die Abrechnung selbst
+                'AbrechnungID' => $a->AbrechnungID,
                 'mitarbeiterName' => $a->creator ? ($a->creator->vorname . ' ' . $a->creator->name) : 'Unbekannt',
+
+                // Hier die neuen Variablen nutzen:
+                'quartal' => $quartalName,
+                'zeitraum' => $zeitraumString,
+
                 'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
-                'zeitraum' => \Carbon\Carbon::parse($a->zeitraumVon)->format('d.m.Y') . ' - ' . \Carbon\Carbon::parse($a->zeitraumBis)->format('d.m.Y'),
                 'datumEingereicht' => $a->createdAt->format('d.m.Y'),
 
-                // DETAILS FORMATIEREN
                 'details' => $a->stundeneintraege->map(function($eintrag) {
                     return [
-                        // WICHTIG !!! Hier hat die ID gefehlt:
                         'EintragID' => $eintrag->EintragID,
-
-                        'datum' => \Carbon\Carbon::parse($eintrag->datum)->format('Y-m-d'), // Besser Y-m-d für Inputs!
+                        'datum' => \Carbon\Carbon::parse($eintrag->datum)->format('Y-m-d'),
                         'beginn' => \Carbon\Carbon::parse($eintrag->beginn)->format('H:i'),
                         'ende'   => \Carbon\Carbon::parse($eintrag->ende)->format('H:i'),
                         'dauer'  => $eintrag->dauer,
@@ -285,5 +398,60 @@ class AbteilungsleiterController extends Controller
         ]);
 
         return response()->json(['message' => 'Abrechnung erfolgreich genehmigt.']);
+    }
+    // In App\Http\Controllers\AbteilungsleiterController.php
+
+    public function reject(Request $request, $id)
+    {
+        // Validierung: Ein Grund ist Pflicht!
+        $request->validate([
+            'grund' => 'required|string|min:5',
+        ]);
+
+        $adminId = Auth::id();
+        $grund = $request->input('grund');
+
+        // Status-IDs (an deine DB anpassen)
+        // 10 = Offen / Korrektur erforderlich (Damit der User es wieder bearbeiten kann)
+        // 90 = Abgelehnt (Falls du einen expliziten Status willst)
+        $statusNeuA = 24;
+        $statusNeuS = 12;
+
+        try {
+            DB::transaction(function () use ($id, $adminId, $statusNeuA, $statusNeuS, $grund) {
+                // 1. Abrechnung Status ändern
+                $abrechnung = Abrechnung::findOrFail($id);
+                // Optional: Prüfen, ob sie überhaupt im Status "Eingereicht" (11) ist
+
+                // 2. Log für Abrechnung schreiben
+                \App\Models\AbrechnungStatusLog::create([
+                    'fk_abrechnungID' => $id,
+                    'fk_statusID'     => $statusNeuA,
+                    'modifiedBy'      => $adminId,
+                    'modifiedAt'      => now(),
+                    'kommentar'       => 'ABGELEHNT: ' . $grund
+                ]);
+
+                // 3. Alle zugehörigen Stundeneinträge auch zurücksetzen
+                // Damit der Mitarbeiter diese wieder bearbeiten kann
+                $eintraege = Stundeneintrag::where('fk_abrechnungID', $id)->get();
+
+                foreach($eintraege as $eintrag) {
+                    // Log für den Eintrag
+                    StundeneintragStatusLog::create([
+                        'fk_stundeneintragID' => $eintrag->EintragID,
+                        'fk_statusID'         => $statusNeuS,
+                        'modifiedBy'          => $adminId,
+                        'modifiedAt'          => now(),
+                        'kommentar'           => 'Abrechnung abgelehnt.',
+                    ]);
+                }
+            });
+
+            return response()->json(['message' => 'Abrechnung wurde abgelehnt und zur Korrektur zurückgewiesen.']);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Fehler beim Ablehnen: ' . $e->getMessage()], 500);
+        }
     }
 }
