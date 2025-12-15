@@ -58,7 +58,7 @@ class StundeneintragController extends Controller
                     'fk_statusID'         => $validated['status_id'],
                     'modifiedBy'          => Auth::id(),
                     'modifiedAt'          => now(),
-                    'kommentar'           => ($validated['status_id'] == 4) ? 'Entwurf erstellt' : 'Stundeneintrag eingereicht',
+                    'kommentar'           => 'Stundeneintrag erstellt',
                 ]);
             });
 

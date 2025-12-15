@@ -260,7 +260,7 @@ onMounted(() => {
             <div class="submission-row" @click="toggleDetails(item.AbrechnungID)">
               <div class="submission-main">
                 <div class="line">
-                  <span class="label">Mitarbeiter:</span>
+                  <span class="label">Übungsleiter:</span>
                   <span class="value font-weight-bold">{{ item.mitarbeiterName }}</span>
                 </div>
                 <div class="line">
