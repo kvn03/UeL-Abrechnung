@@ -184,6 +184,7 @@ class AuthController extends Controller
         // 4. Alles zurückgeben
         return response()->json([
             'user' => [
+                'id' => $user->UserID,
                 'name' => $user->name,
                 'vorname' => $user->vorname,
                 'email' => $user->email,

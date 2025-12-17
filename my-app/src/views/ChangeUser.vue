@@ -13,19 +13,14 @@ const error = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 const globalSaving = ref(false);
 
-// Alle Abteilungen für Dropdowns, aus den vorhandenen User-Zuweisungen zusammengemergt
-const allDepartments = computed<DepartmentDto[]>(() => {
-  const map = new Map<number, DepartmentDto>();
-  for (const user of users.value) {
-    for (const d of user.departmentHeadDepartments || []) {
-      if (!map.has(d.id)) map.set(d.id, d);
-    }
-    for (const d of user.trainerDepartments || []) {
-      if (!map.has(d.id)) map.set(d.id, d);
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-});
+// Suchbegriff
+const searchTerm = ref('');
+
+// Aktueller Benutzer (aus Dashboard-API)
+const currentUserId = ref<number | null>(null);
+
+// Abteilungen aus der DB
+const departments = ref<DepartmentDto[]>([]);
 
 // Edit-Status pro User (damit man togglen kann, ohne sofort zu speichern)
 interface EditState {
@@ -48,6 +43,31 @@ const initEditStateForUser = (user: UserDto) => {
   };
 };
 
+const loadCurrentUser = async () => {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      currentUserId.value = null;
+      return;
+    }
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    const response = await axios.get('http://127.0.0.1:8000/api/dashboard');
+    currentUserId.value = response.data.user?.id ?? null;
+  } catch (e) {
+    console.error('Fehler beim Laden des aktuellen Benutzers:', e);
+    currentUserId.value = null;
+  }
+};
+
+const loadDepartments = async () => {
+  try {
+    const response = await axios.get('http://127.0.0.1:8000/api/abteilungen');
+    departments.value = response.data as DepartmentDto[];
+  } catch (e) {
+    console.error('Konnte Abteilungen nicht laden. Ist das Backend gestartet?', e);
+  }
+};
+
 const loadUsers = async () => {
   isLoading.value = true;
   error.value = null;
@@ -60,7 +80,19 @@ const loadUsers = async () => {
     axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
     const result = await fetchUsers();
-    users.value = result;
+    // Alphabetisch nach Vorname, dann Nachname sortieren
+    users.value = [...result].sort((a, b) => {
+      const aFirst = a.vorname?.toLocaleLowerCase() ?? '';
+      const bFirst = b.vorname?.toLocaleLowerCase() ?? '';
+      if (aFirst < bFirst) return -1;
+      if (aFirst > bFirst) return 1;
+      const aLast = a.name?.toLocaleLowerCase() ?? '';
+      const bLast = b.name?.toLocaleLowerCase() ?? '';
+      if (aLast < bLast) return -1;
+      if (aLast > bLast) return 1;
+      return 0;
+    });
+
     editStates.value = {};
     for (const u of users.value) {
       initEditStateForUser(u);
@@ -73,10 +105,15 @@ const loadUsers = async () => {
   }
 };
 
-onMounted(loadUsers);
+onMounted(async () => {
+  await Promise.all([loadCurrentUser(), loadDepartments(), loadUsers()]);
+});
 
 const buildPayload = (userId: number): UpdateUserRolesPayload => {
   const state = editStates.value[userId];
+  if (!state) {
+    throw new Error(`Kein EditState für User ${userId} vorhanden`);
+  }
   return {
     isAdmin: state.isAdmin,
     isGeschaeftsstelle: state.isGeschaeftsstelle,
@@ -87,24 +124,25 @@ const buildPayload = (userId: number): UpdateUserRolesPayload => {
   };
 };
 
-const saveUser = async (userId: number) => {
+// Abteilungsleiter sollen nur eine einzige Abteilung haben
+const onDepartmentHeadChange = (userId: number, value: number[] | number) => {
   const state = editStates.value[userId];
   if (!state) return;
-  state.saving = true;
-  error.value = null;
-  try {
-    const payload = buildPayload(userId);
-    await updateUserRoles(userId, payload);
-    successMessage.value = 'Änderungen erfolgreich gespeichert.';
-    // Nach Erfolg nochmal laden, um Ansicht zu synchronisieren
-    await loadUsers();
-  } catch (e: any) {
-    console.error('Fehler beim Speichern der Benutzerrollen:', e);
-    error.value = 'Konnte Änderungen nicht speichern.';
-  } finally {
-    const s = editStates.value[userId];
-    if (s) s.saving = false;
+
+  // Immer als Array behandeln und nur gültige Nummern übernehmen
+  const valuesArray: number[] = [];
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      if (typeof v === 'number') valuesArray.push(v);
+    }
+  } else if (typeof value === 'number') {
+    valuesArray.push(value);
   }
+
+  // Nur das erste ausgewählte Element erlauben
+  state.departmentHeadIds = valuesArray.length > 0 ? [valuesArray[0] as number] : [];
+
+  markDirty(userId);
 };
 
 // Markiert einen Benutzer als "dirty" (geändert), um das globale Speichern zu ermöglichen
@@ -114,13 +152,41 @@ const markDirty = (userId: number) => {
   // Hier könnte man eine spezifische Logik einfügen, falls nötig
 };
 
-// Speichert alle Änderungen für alle Benutzer, die als "dirty" markiert sind
+// Gefilterte Benutzerliste anhand der Suchleiste
+const filteredUsers = computed(() => {
+  const term = searchTerm.value.trim().toLocaleLowerCase();
+
+  // aktuellen Benutzer aus der Liste entfernen
+  const baseUsers = users.value.filter((u) => {
+    if (currentUserId.value === null) return true;
+    return u.id !== currentUserId.value;
+  });
+
+  if (!term) return baseUsers;
+
+  return baseUsers.filter((u) => {
+    const first = u.vorname?.toLocaleLowerCase() ?? '';
+    const last = u.name?.toLocaleLowerCase() ?? '';
+    const mail = u.email?.toLocaleLowerCase() ?? '';
+    return (
+      first.includes(term) ||
+      last.includes(term) ||
+      mail.includes(term)
+    );
+  });
+});
+
+// Speichert alle Änderungen für alle Benutzer
 const saveAllChanges = async () => {
   globalSaving.value = true;
   error.value = null;
   successMessage.value = null;
   try {
     for (const user of users.value) {
+      // Eigenen Account überspringen
+      if (currentUserId.value !== null && user.id === currentUserId.value) {
+        continue;
+      }
       const state = editStates.value[user.id];
       if (state) {
         const payload = buildPayload(user.id);
@@ -175,11 +241,23 @@ const saveAllChanges = async () => {
         </div>
 
         <div v-else>
+          <!-- Suchleiste -->
+          <div class="mb-4 search-bar">
+            <v-text-field
+              v-model="searchTerm"
+              label="Benutzer suchen"
+              prepend-inner-icon="mdi-magnify"
+              density="comfortable"
+              variant="outlined"
+              clearable
+              hide-details
+            />
+          </div>
+
           <div class="user-table-wrapper">
             <table class="user-table">
               <thead>
               <tr>
-                <th>ID</th>
                 <th>Vorname</th>
                 <th>Name</th>
                 <th>E-Mail</th>
@@ -190,16 +268,18 @@ const saveAllChanges = async () => {
               </tr>
               </thead>
               <tbody>
-              <tr v-for="user in users" :key="user.id">
-                <td>{{ user.id }}</td>
+              <tr
+                v-for="user in filteredUsers"
+                :key="user.id"
+              >
                 <td>{{ user.vorname }}</td>
                 <td>{{ user.name }}</td>
                 <td>{{ user.email }}</td>
 
                 <td>
                   <v-select
-                    v-model="editStates[user.id].isAdmin"
-                    :items="[{ label: 'Ja', value: true }, { label: 'Nein', value: false }]"
+                    v-model="editStates[user.id]!.isAdmin"
+                    :items="[{ label: 'Ja', value: true }, { label: 'Nein', value: false }] as const"
                     item-title="label"
                     item-value="value"
                     density="compact"
@@ -211,8 +291,8 @@ const saveAllChanges = async () => {
 
                 <td>
                   <v-select
-                    v-model="editStates[user.id].isGeschaeftsstelle"
-                    :items="[{ label: 'Ja', value: true }, { label: 'Nein', value: false }]"
+                    v-model="editStates[user.id]!.isGeschaeftsstelle"
+                    :items="[{ label: 'Ja', value: true }, { label: 'Nein', value: false }] as const"
                     item-title="label"
                     item-value="value"
                     density="compact"
@@ -224,8 +304,23 @@ const saveAllChanges = async () => {
 
                 <td>
                   <v-select
-                    v-model="editStates[user.id].departmentHeadIds"
-                    :items="allDepartments"
+                    v-model="editStates[user.id]!.departmentHeadIds"
+                    :items="departments"
+                    item-title="name"
+                    item-value="id"
+                    chips
+                    density="compact"
+                    hide-details
+                    placeholder="Keine"
+                    class="dept-select"
+                    @update:model-value="onDepartmentHeadChange(user.id, $event)"
+                  />
+                </td>
+
+                <td>
+                  <v-select
+                    v-model="editStates[user.id]!.trainerIds"
+                    :items="departments"
                     item-title="name"
                     item-value="id"
                     chips
@@ -237,21 +332,10 @@ const saveAllChanges = async () => {
                     @update:model-value="markDirty(user.id)"
                   />
                 </td>
-
-                <td>
-                  <v-select
-                    v-model="editStates[user.id].trainerIds"
-                    :items="allDepartments"
-                    item-title="name"
-                    item-value="id"
-                    chips
-                    multiple
-                    density="compact"
-                    hide-details
-                    placeholder="Keine"
-                    class="dept-select"
-                    @update:model-value="markDirty(user.id)"
-                  />
+              </tr>
+              <tr v-if="filteredUsers.length === 0">
+                <td colspan="7" class="text-medium-emphasis">
+                  Keine Benutzer für den Suchbegriff gefunden.
                 </td>
               </tr>
               </tbody>
@@ -303,5 +387,13 @@ const saveAllChanges = async () => {
 
 .user-table tr:nth-child(even) {
   background-color: #fafafa;
+}
+
+.search-bar {
+  max-width: 320px;
+}
+
+.is-current-user {
+  opacity: 0.6;
 }
 </style>
