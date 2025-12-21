@@ -9,14 +9,14 @@ import EnterPassword from '../views/EnterPassword.vue'
 import SetPassword from '../views/SetPassword.vue'
 import NoPassword from '../views/NoPassword.vue'
 import CreateUser from '../views/CreateUser.vue'
-import Timesheet from '../views/Timesheet.vue'
+import UelTimesheet from '../views/Uebungsleiter/UEL_Timesheet.vue'
 import Submitted from '../views/Submitted.vue'
-import UelDrafts from '../views/UEL_Drafts.vue'
-import UelTimesheetSubmissions from '../views/UEL_TimesheetSubmissions.vue'
-import AlReleaseSubmissions from '../views/AL_ReleaseSubmissions.vue'
-import GsAllTimesheetSubmissions from '../views/GS_AllTimesheetSubmissions.vue'
-import GsTimesheetHistory from '../views/GS_TimesheetHistory.vue'
-import GsTimesheetsToPay from '../views/GS_TimesheetsToPay.vue'
+import UelDrafts from '../views/Uebungsleiter/UEL_Drafts.vue'
+import UelTimesheetSubmissions from '../views/Uebungsleiter/UEL_TimesheetSubmissions.vue'
+import AlReleaseSubmissions from '../views/Abteilungsleiter/AL_ReleaseSubmissions.vue'
+import GsAllTimesheetSubmissions from '../views/Geschaeftsstelle/GS_AllTimesheetSubmissions.vue'
+import GsTimesheetHistory from '../views/Geschaeftsstelle/GS_TimesheetHistory.vue'
+import GsTimesheetsToPay from '../views/Geschaeftsstelle/GS_TimesheetsToPay.vue'
 import ChangeUser from '../views/ChangeUser.vue'
 
 const API_URL = 'http://127.0.0.1:8000/api'
@@ -29,7 +29,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/set-password', name: 'SetPassword', component: SetPassword },
   { path: '/no-password', name: 'NoPassword', component: NoPassword },
   { path: '/create-user', name: 'CreateUser', component: CreateUser, meta: { requiresAuth: true }},
-  { path: '/timesheet', name: 'Timesheet', component: Timesheet, meta: { requiresAuth: true } },
+  { path: '/timesheet', name: 'Timesheet', component: UelTimesheet, meta: { requiresAuth: true } },
   { path: '/drafts', name: 'Drafts', component: UelDrafts, meta: { requiresAuth: true } },
   { path: '/submitted', name: 'Submitted', component: Submitted, meta: { requiresAuth: true } },
   { path: '/timesheet-submissions', name: 'TimesheetSubmissions', component: UelTimesheetSubmissions, meta: { requiresAuth: true } },

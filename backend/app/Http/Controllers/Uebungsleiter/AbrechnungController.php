@@ -1,15 +1,18 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Uebungsleiter;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Auth;
-use App\Models\Stundeneintrag;
+use App\Http\Controllers\Controller;
 use App\Models\Abrechnung;
 use App\Models\AbrechnungStatusLog;
+use App\Models\Quartal;
+use App\Models\Stundeneintrag;
 use App\Models\StundeneintragStatusLog;
-use App\Models\Quartal; // <--- WICHTIG: Quartal importieren
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+
+// <--- WICHTIG: Quartal importieren
 
 class AbrechnungController extends Controller
 {
@@ -157,5 +160,92 @@ class AbrechnungController extends Controller
         });
 
         return response()->json($result);
+    }
+    /**
+     * Lädt die Details einer einzelnen Abrechnung inkl. aller Einträge und deren Historie.
+     */
+    public function show($id)
+    {
+        $userId = Auth::id();
+
+        // 1. Abrechnung laden und prüfen
+        // NEU: Wir laden hier auch 'statusLogs.statusDefinition' der Abrechnung!
+        $abrechnung = Abrechnung::where('AbrechnungID', $id)
+            ->where('createdBy', $userId)
+            ->with(['quartal', 'statusLogs.statusDefinition'])
+            ->first();
+
+        if (!$abrechnung) {
+            return response()->json(['message' => 'Abrechnung nicht gefunden'], 404);
+        }
+
+        // 2. Abrechnungs-Historie formatieren (NEU)
+        $abrechnungHistory = $abrechnung->statusLogs ? $abrechnung->statusLogs->map(function ($log) {
+            return [
+                'date'       => $log->modifiedAt, // String (da kein Cast im Model) oder Obj
+                'user_id'    => $log->modifiedBy,
+                'title'      => $log->statusDefinition->name ?? 'Status geändert',
+                'kommentar'  => $log->kommentar
+            ];
+        })->sortByDesc('date')->values() : [];
+
+        // 3. Stundeneinträge laden
+        $eintraege = Stundeneintrag::where('fk_abrechnungID', $abrechnung->AbrechnungID)
+            ->with([
+                'auditLogs',
+                'statusLogs.statusDefinition'
+            ])
+            ->orderBy('datum', 'asc')
+            ->get();
+
+        // 4. Stundeneinträge formatieren (Wie vorher)
+        $eintraegeFormatted = $eintraege->map(function ($eintrag) {
+            // (Hier bleibt dein bestehender Code für Audit/Status Logs der Einträge)
+            // ... Copy & Paste aus deinem funktionierenden Code oder siehe unten ...
+
+            // Kurzfassung der Logik von vorhin:
+            $audits = $eintrag->auditLogs ? $eintrag->auditLogs->map(function ($log) {
+                return [
+                    'type' => 'audit', 'date' => $log->modifiedAt,
+                    'title' => "Feld '{$log->feldname}' geändert",
+                    'details' => "'{$log->alter_wert}' → '{$log->neuer_wert}'", 'kommentar' => $log->kommentar
+                ];
+            }) : collect([]);
+
+            $statuses = $eintrag->statusLogs ? $eintrag->statusLogs->map(function ($log) {
+                return [
+                    'type' => 'status', 'date' => $log->modifiedAt,
+                    'title' => "Status: " . ($log->statusDefinition->name ?? 'Unbekannt'),
+                    'details' => '', 'kommentar' => $log->kommentar
+                ];
+            }) : collect([]);
+
+            $history = $audits->concat($statuses)->sortByDesc('date')->values();
+
+            $datumFormatted = $eintrag->datum
+                ? \Carbon\Carbon::parse($eintrag->datum)->format('d.m.Y') : '-';
+            $startFormatted = $eintrag->beginn
+                ? \Carbon\Carbon::parse($eintrag->beginn)->format('H:i') : '-';
+            $endeFormatted  = $eintrag->ende
+                ? \Carbon\Carbon::parse($eintrag->ende)->format('H:i') : '-';
+
+            return [
+                'id' => $eintrag->EintragID,
+                'datum' => $datumFormatted,
+                'start' => $startFormatted,
+                'ende'  => $endeFormatted,
+                'dauer' => (float) $eintrag->dauer,
+                'kurs'  => $eintrag->kurs ?? '',
+                'history' => $history
+            ];
+        });
+
+        return response()->json([
+            'abrechnung_id' => $abrechnung->AbrechnungID,
+            'quartal' => $abrechnung->quartal ? $abrechnung->quartal->bezeichnung : '-',
+            // NEU: Wir geben die History der Abrechnung zurück
+            'abrechnung_history' => $abrechnungHistory,
+            'eintraege' => $eintraegeFormatted
+        ]);
     }
 }

@@ -1,16 +1,18 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Abteilungsleiter;
 
+use App\Http\Controllers\Controller;
 use App\Models\Abrechnung;
-use Illuminate\Http\Request;
 use App\Models\Stundeneintrag;
 use App\Models\StundeneintragStatusLog;
-use App\Models\StundeneintragAuditLog; // <--- Hinzufügen
 use App\Models\UserRolleAbteilung;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+
+// <--- Hinzufügen
 
 class AbteilungsleiterController extends Controller
 {

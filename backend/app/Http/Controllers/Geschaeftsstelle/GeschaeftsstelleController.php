@@ -1,15 +1,18 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Geschaeftsstelle;
 
+use App\Http\Controllers\Controller;
 use App\Models\Abrechnung;
 use App\Models\Stundeneintrag;
+use App\Models\StundeneintragAuditLog;
 use App\Models\StundeneintragStatusLog;
-use App\Models\StundeneintragAuditLog; // <--- WICHTIG: Import hinzugefügt
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+
+// <--- WICHTIG: Import hinzugefügt
 
 class GeschaeftsstelleController extends Controller
 {

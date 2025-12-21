@@ -1,13 +1,13 @@
 <?php
 
+use App\Http\Controllers\AbteilungController;
+use App\Http\Controllers\Abteilungsleiter\AbteilungsleiterController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\Geschaeftsstelle\GeschaeftsstelleController;
+use App\Http\Controllers\StundeneintragController;
+use App\Http\Controllers\Uebungsleiter\AbrechnungController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\AbteilungController;
-use App\Http\Controllers\StundeneintragController;
-use App\Http\Controllers\AbrechnungController;
-use App\Http\Controllers\AbteilungsleiterController;
-use App\Http\Controllers\GeschaeftsstelleController;
 
 /*
 |--------------------------------------------------------------------------
@@ -27,6 +27,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         return $request->user();
     });
     Route::get('/dashboard', [AuthController::class, 'dashboard']);
+    Route::get('/abrechnung/meine/{id}', [AbrechnungController::class, 'show']);
     Route::get('/meine-uel-abteilungen', [AbteilungController::class, 'getMeineUelAbteilungen']);
     Route::post('/stundeneintrag', [StundeneintragController::class, 'store']);
     Route::get('/entwuerfe', [StundeneintragController::class, 'getEntwuerfe']);
