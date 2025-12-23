@@ -1,4 +1,4 @@
-// TypeScript
+// UeL-Abrechnung/my-app/src/router/index.ts
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import axios from 'axios'
@@ -18,6 +18,8 @@ import GsAllTimesheetSubmissions from '../views/Geschaeftsstelle/GS_AllTimesheet
 import GsTimesheetHistory from '../views/Geschaeftsstelle/GS_TimesheetHistory.vue'
 import GsTimesheetsToPay from '../views/Geschaeftsstelle/GS_TimesheetsToPay.vue'
 import ChangeUser from '../views/ChangeUser.vue'
+import UelEditProfile from "../views/Uebungsleiter/UEL_EditProfile.vue";
+import UelUploadLicense from "../views/Uebungsleiter/UEL_UploadLicense.vue"
 
 const API_URL = 'http://127.0.0.1:8000/api'
 
@@ -38,6 +40,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/timesheet-history', name: 'TimesheetHistory', component: GsTimesheetHistory, meta: { requiresAuth: true, requiresOffice: true } },
   { path: '/timesheets-to-pay', name: 'TimesheetsToPay', component: GsTimesheetsToPay, meta: { requiresAuth: true, requiresOffice: true } },
   { path: '/change-user', name: 'ChangeUser', component: ChangeUser, meta: { requiresAuth: true } },
+  { path: '/edit-profile', name: 'EditProfile', component: UelEditProfile, meta: { requiresAuth: true, requiresTrainer: true } },
+  { path: '/upload-license', name: 'UelUploadLicense', component: UelUploadLicense, meta: { requiresAuth: true, requiresTrainer: true } },
+
 ]
 
 const router = createRouter({
@@ -77,23 +82,65 @@ async function fetchCurrentUser() {
   return cachedUser
 }
 
+let cachedPermissions: any[] | null = null
+let permissionsLoaded = false
+
+async function fetchCurrentPermissions() {
+  if (permissionsLoaded) return cachedPermissions
+
+  const token = localStorage.getItem('auth_token')
+  if (!token) {
+    cachedPermissions = null
+    permissionsLoaded = true
+    return null
+  }
+
+  axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+
+  try {
+    const response = await axios.get(`${API_URL}/dashboard`)
+    cachedPermissions = response.data.berechtigungen ?? []
+  } catch (e) {
+    console.error('Fehler beim Laden der Berechtigungen im Router-Guard:', e)
+    cachedPermissions = null
+  } finally {
+    permissionsLoaded = true
+  }
+
+  return cachedPermissions
+}
+
+function isTrainerRole(rolle: unknown): boolean {
+  return rolle === 'Uebungsleiter' || rolle === 'Übungsleiter'
+}
+
 router.beforeEach(async (to, _from, next) => {
   const requiresAuth = (to.meta as { requiresAuth?: boolean }).requiresAuth
   const requiresOffice = (to.meta as { requiresOffice?: boolean }).requiresOffice
+  const requiresTrainer = (to.meta as { requiresTrainer?: boolean }).requiresTrainer
 
   if (to.name === 'Login' && isAuthenticated()) {
     return next({ name: 'Dashboard' })
   }
 
   if (
-    isAuthenticated() &&
-    (to.name === 'EnterPassword' || to.name === 'NoPassword')
+      isAuthenticated() &&
+      (to.name === 'EnterPassword' || to.name === 'NoPassword')
   ) {
     return next({ name: 'Dashboard' })
   }
 
   if (requiresAuth && !isAuthenticated()) {
     return next({ name: 'Login' })
+  }
+
+  // Übungsleiter-Schutz (nur wenn gefordert)
+  if (requiresTrainer) {
+    const permissions = await fetchCurrentPermissions()
+    const ok = Array.isArray(permissions) && permissions.some(p => isTrainerRole(p?.rolle))
+    if (!ok) {
+      return next({ name: 'Dashboard' })
+    }
   }
 
   if (!requiresOffice) {
