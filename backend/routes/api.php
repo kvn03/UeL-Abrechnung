@@ -6,6 +6,8 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\Geschaeftsstelle\GeschaeftsstelleController;
 use App\Http\Controllers\StundeneintragController;
 use App\Http\Controllers\Uebungsleiter\AbrechnungController;
+use App\Http\Controllers\Uebungsleiter\StammdatenController;
+use App\Http\Controllers\Abteilungsleiter\StundensatzController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -36,6 +38,10 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::put('/stundeneintrag/{id}', [StundeneintragController::class, 'update']);
     Route::post('/abrechnung/erstellen', [AbrechnungController::class, 'erstellen']);
     Route::get('/abrechnung/meine', [AbrechnungController::class, 'getMeineAbrechnungen']);
+    Route::get('/uebungsleiter/profil', [StammdatenController::class, 'getProfile']);
+    Route::post('/uebungsleiter/profil', [StammdatenController::class, 'updateProfile']);
+    Route::get('/admin/users', [AuthController::class, 'listUsers']);
+    Route::put('/admin/users/{id}/roles', [AuthController::class, 'updateUserRoles']);
     //Geschäftsstelle-Routen
     Route::group(['middleware' => ['gs']], function ()
     {
@@ -46,6 +52,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::put('/geschaeftsstelle/stundeneintrag/{id}', [GeschaeftsstelleController::class, 'updateEntry']);
         Route::delete('/geschaeftsstelle/stundeneintrag/{id}', [GeschaeftsstelleController::class, 'deleteEntry']);
         Route::post('/geschaeftsstelle/abrechnungen/{id}/reject', [GeschaeftsstelleController::class, 'reject']);
+        Route::get('/geschaeftsstelle/mitarbeiter', [GeschaeftsstelleController::class, 'getAllMitarbeiter']);
+        Route::post('/geschaeftsstelle/stundensatz', [StundensatzController::class, 'updateStundensatz']);
     });
     //Abteilungsleiter-Routen
     Route::group(['middleware' => ['al']], function ()
@@ -56,12 +64,13 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::put('/abteilungsleiter/stundeneintrag/{id}', [AbteilungsleiterController::class, 'updateEntry']);
         Route::delete('/abteilungsleiter/stundeneintrag/{id}', [AbteilungsleiterController::class, 'deleteEntry']);
         Route::post('/abteilungsleiter/abrechnungen/{id}/reject', [AbteilungsleiterController::class, 'reject']);
+        Route::get('/abteilungsleiter/mitarbeiter', [StundensatzController::class, 'getMitarbeiter']);
+        Route::post('/abteilungsleiter/stundensatz', [StundensatzController::class, 'updateStundensatz']);
+        Route::get('/meine-al-abteilungen', [AbteilungController::class, 'getMeineLeiterAbteilungen']);
     });
     //Admin-Routen
     Route::group(['middleware' => ['admin']], function ()
     {
         Route::post('/create-user', [AuthController::class, 'createUser']);
-        Route::get('/admin/users', [AuthController::class, 'listUsers']);
-        Route::put('/admin/users/{id}/roles', [AuthController::class, 'updateUserRoles']);
     });
 });

@@ -31,7 +31,6 @@ interface HistoryEntry {
   kommentar: string | null
 }
 
-// NEU: Interface für Abrechnungs-Log
 interface AbrechnungLogEntry {
   date: string
   title: string
@@ -51,7 +50,7 @@ interface DetailEntry {
 interface AbrechnungDetails {
   abrechnung_id: number
   quartal: string
-  abrechnung_history: AbrechnungLogEntry[] // NEU
+  abrechnung_history: AbrechnungLogEntry[]
   eintraege: DetailEntry[]
 }
 
@@ -123,7 +122,7 @@ function getStatusColor(statusId: number): string {
   if (statusId === 21) return 'orange-darken-1'
   if (statusId === 22) return 'green'
   if (statusId === 23) return 'teal'
-  if (statusId === 24) return 'red' // Abgebrochen
+  if (statusId === 24) return 'red'
   return 'grey-darken-1'
 }
 
@@ -201,6 +200,7 @@ onMounted(() => {
           <v-table density="comfortable" hover>
             <thead>
             <tr>
+              <th class="text-left" style="width: 80px;">ID</th>
               <th class="text-left">Quartal</th>
               <th class="text-left">Zeitraum</th>
               <th class="text-left">Eingereicht am</th>
@@ -211,6 +211,7 @@ onMounted(() => {
             </thead>
             <tbody>
             <tr v-for="item in filteredSubmissions" :key="item.id">
+              <td class="text-medium-emphasis">#{{ item.id }}</td>
               <td class="font-weight-bold text-primary">{{ item.quartal_name }}</td>
               <td class="text-medium-emphasis">{{ item.zeitraum }}</td>
               <td class="text-medium-emphasis">{{ item.datum_erstellt }}</td>
@@ -257,7 +258,7 @@ onMounted(() => {
           <span>
             Details:
             <span v-if="selectedAbrechnungDetails" class="text-primary">
-              {{ selectedAbrechnungDetails.quartal }}
+              #{{ selectedAbrechnungDetails.abrechnung_id }} | {{ selectedAbrechnungDetails.quartal }}
             </span>
           </span>
           <v-btn icon="mdi-close" variant="text" @click="showDetailDialog = false"></v-btn>
@@ -275,7 +276,7 @@ onMounted(() => {
             <div class="mb-6">
               <h3 class="text-subtitle-1 font-weight-bold mb-2 d-flex align-center">
                 <v-icon icon="mdi-clipboard-list-outline" start color="primary"></v-icon>
-                Statusverlauf der Abrechnung
+                Statusverlauf der Abrechnung (#{{ selectedAbrechnungDetails.abrechnung_id }})
               </h3>
 
               <v-card border flat class="bg-grey-lighten-5 pa-2">

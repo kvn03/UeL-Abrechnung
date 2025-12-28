@@ -53,4 +53,17 @@ class User extends Authenticatable
             })
             ->exists();
     }
+
+    public function stundensaetze()
+    {
+        return $this->hasMany(Stundensatz::class, 'fk_userID', 'UserID');
+    }
+
+    // Hilfsmethode: Den aktuell gültigen Satz abrufen
+    public function aktuellerStundensatz()
+    {
+        return $this->hasOne(Stundensatz::class, 'fk_userID', 'UserID')
+            ->whereNull('gueltigBis')
+            ->latest('gueltigVon');
+    }
 }

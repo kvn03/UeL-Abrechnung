@@ -181,6 +181,15 @@
                     >
                       Abrechnungen freigeben
                     </v-btn>
+                    <v-btn
+                        class="w-100"
+                        color="secondary"
+                        variant="tonal"
+                        prepend-icon="mdi-cash-edit"
+                        @click="router.push({ name: 'ManageRates' })"
+                    >
+                      Stundensätze verwalten
+                    </v-btn>
 
                     <div></div>
                   </template>
@@ -215,6 +224,15 @@
                         @click="router.push({ name: 'TimesheetHistory' })"
                     >
                       Abrechnungshistorie
+                    </v-btn>
+                    <v-btn
+                        class="w-100"
+                        color="secondary"
+                        variant="tonal"
+                        prepend-icon="mdi-cash-edit"
+                        @click="router.push({ name: 'ManageAllRates' })"
+                    >
+                      Alle Stundensätze verwalten
                     </v-btn>
 
                     <!-- NEU: User verwalten (Geschäftsstelle) -->

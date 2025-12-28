@@ -21,7 +21,7 @@ class StundeneintragController extends Controller
             'datum'         => 'required|date',
             'beginn'        => 'required|date_format:H:i',
             'ende'          => 'required|date_format:H:i|after:beginn', // Ende muss nach Beginn sein
-            'kurs'          => 'nullable|string',
+            'kurs'          => 'required|string',
             'fk_abteilung'  => 'nullable|exists:abteilung_definition,AbteilungID', // Prüft, ob Abteilung existiert
             'status_id'         => 'required|integer|in:10,11,12',
         ]);

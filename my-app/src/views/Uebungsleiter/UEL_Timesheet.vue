@@ -24,7 +24,6 @@ const entryId = ref<string | null>(null)
 const isEditMode = computed(() => !!entryId.value)
 
 const departments = ref<Department[]>([])
-const courseOptions = ['Training', 'Wettkampf', 'Vorbereitung', 'Sonstiges']
 
 // Snapshot für Änderungen
 const originalData = ref<{
@@ -121,8 +120,6 @@ async function onSubmit() {
   const { valid } = await form.value?.validate() || { valid: false }
   if (!valid) return
 
-  // Nur prüfen wenn wir bearbeiten.
-  // Wenn wir bearbeiten und nichts geändert haben -> Abbruch
   if (isEditMode.value && !hasChanges()) {
     alert("Es wurden keine Änderungen vorgenommen.")
     return
@@ -130,7 +127,6 @@ async function onSubmit() {
 
   isLoading.value = true
 
-  // Wir setzen hier hart die 10 ("Offen")
   const payload = {
     datum: date.value,
     beginn: startTime.value,
@@ -142,11 +138,9 @@ async function onSubmit() {
 
   try {
     if (isEditMode.value) {
-      // UPDATE (PUT)
       await axios.put(`http://127.0.0.1:8000/api/stundeneintrag/${entryId.value}`, payload)
       alert("Eintrag aktualisiert!")
     } else {
-      // NEU (POST)
       await axios.post('http://127.0.0.1:8000/api/stundeneintrag', payload)
       alert("Eintrag erfolgreich erstellt!")
     }
@@ -161,8 +155,6 @@ async function onSubmit() {
 }
 
 function goBack() {
-  // Je nach Workflow kannst du hier entscheiden, wohin es zurückgeht.
-  // Dashboard macht meist Sinn, wenn es keine Entwurfsliste mehr gibt.
   if (isEditMode.value) router.push({ name: 'Drafts' })
   else router.push({ name: 'Dashboard' })
 }
@@ -200,7 +192,15 @@ function goBack() {
             <v-text-field v-model="startTime" label="Beginn" type="time" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-4 flex-grow-1"></v-text-field>
             <v-text-field v-model="endTime" label="Ende" type="time" variant="outlined" density="comfortable" :rules="endTimeRules" class="mb-4 flex-grow-1"></v-text-field>
           </div>
-          <v-combobox v-model="course" :items="courseOptions" label="Kurs" variant="outlined" density="comfortable" class="mb-4"></v-combobox>
+
+          <v-text-field
+              v-model="course"
+              label="Kurs"
+              variant="outlined"
+              density="comfortable"
+              :rules="requiredRule"
+              class="mb-4"
+          ></v-text-field>
 
           <div class="d-flex justify-center mt-6">
             <v-btn

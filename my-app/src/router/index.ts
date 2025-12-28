@@ -20,6 +20,8 @@ import GsTimesheetsToPay from '../views/Geschaeftsstelle/GS_TimesheetsToPay.vue'
 import ChangeUser from '../views/ChangeUser.vue'
 import UelEditProfile from "../views/Uebungsleiter/UEL_EditProfile.vue";
 import UelUploadLicense from "../views/Uebungsleiter/UEL_UploadLicense.vue"
+import AL_ChangeStundensatz from '../views/Abteilungsleiter/AL_ChangeStundensatz.vue'
+import GS_ChangeStundensatz from '../views/Geschaeftsstelle/GS_ChangeStundensatz.vue'
 
 const API_URL = 'http://127.0.0.1:8000/api'
 
@@ -42,6 +44,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/change-user', name: 'ChangeUser', component: ChangeUser, meta: { requiresAuth: true } },
   { path: '/edit-profile', name: 'EditProfile', component: UelEditProfile, meta: { requiresAuth: true, requiresTrainer: true } },
   { path: '/upload-license', name: 'UelUploadLicense', component: UelUploadLicense, meta: { requiresAuth: true, requiresTrainer: true } },
+    { path: '/abteilungsleiter/stundensaetze', name: 'ManageRates', component: AL_ChangeStundensatz, meta: { requiresAuth: true } },
+    { path: '/geschaeftsstelle/stundensaetze', name: 'ManageAllRates', component: GS_ChangeStundensatz, meta: { requiresAuth: true }},
 
 ]
 

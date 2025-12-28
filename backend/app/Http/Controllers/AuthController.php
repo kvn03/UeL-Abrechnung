@@ -213,9 +213,13 @@ class AuthController extends Controller
     public function listUsers(Request $request)
     {
         // Optional: Zusätzliche Sicherheitsprüfung, falls Middleware einmal fehlt
-        $user = $request->user();
+        /*$user = $request->user();
         if (!$user || !$user->isAdmin) {
             return response()->json(['message' => 'Forbidden'], 403);
+        }*/
+        // Sicherheitscheck: Nur Admin ODER Geschäftsstelle darf sehen
+        if (!$request->user()->isAdmin && !$request->user()->isGeschaeftsstelle) {
+            return response()->json(['message' => 'Zugriff verweigert'], 403);
         }
 
         // Alle User laden
@@ -276,10 +280,14 @@ class AuthController extends Controller
      */
     public function updateUserRoles(Request $request, $id)
     {
-        $currentUser = $request->user();
-        if (!$currentUser || !$currentUser->isAdmin) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        // Sicherheitscheck: Nur Admin ODER Geschäftsstelle darf sehen
+        if (!$request->user()->isAdmin && !$request->user()->isGeschaeftsstelle) {
+            return response()->json(['message' => 'Zugriff verweigert'], 403);
         }
+//        $currentUser = $request->user();
+//        if (!$currentUser || !$currentUser->isAdmin) {
+//            return response()->json(['message' => 'Forbidden'], 403);
+//        }
 
         $validated = $request->validate([
             'isAdmin' => 'sometimes|boolean',

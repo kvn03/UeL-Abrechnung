@@ -7,6 +7,7 @@ use App\Models\Abrechnung;
 use App\Models\Stundeneintrag;
 use App\Models\StundeneintragAuditLog;
 use App\Models\StundeneintragStatusLog;
+use App\Models\Stundensatz;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -419,5 +420,50 @@ class GeschaeftsstelleController extends Controller
         } catch (\Exception $e) {
             return response()->json(['message' => 'Fehler beim Ablehnen: ' . $e->getMessage()], 500);
         }
+    }
+    public function getAllMitarbeiter()
+    {
+        // 1. Alle User-Abteilungs-Paare laden.
+        $data = DB::table('user')
+            ->join('user_rolle_abteilung', 'user.UserID', '=', 'user_rolle_abteilung.fk_userID')
+            ->join('abteilung_definition', 'user_rolle_abteilung.fk_abteilungID', '=', 'abteilung_definition.AbteilungID')
+            ->select(
+                'user.UserID',
+                'user.name',
+                'user.vorname',
+                'user.email',
+                'abteilung_definition.name as abteilung_name',
+                'abteilung_definition.AbteilungID as abteilung_id'
+            )
+            // WICHTIG: distinct() sorgt dafür, dass User nur einmal pro Abteilung auftauchen,
+            // auch wenn sie dort mehrere Rollen haben.
+            ->distinct()
+            ->orderBy('user.name')
+            ->orderBy('abteilung_definition.name')
+            ->get();
+
+        // 2. Den spezifischen Stundensatz für diese Kombination laden
+        $result = $data->map(function ($row) {
+
+            $currentRate = DB::table('stundensatz')
+                ->where('fk_userID', $row->UserID)
+                ->where('fk_abteilungID', $row->abteilung_id)
+                ->whereNull('gueltigBis')
+                ->orderBy('gueltigVon', 'desc')
+                ->first();
+
+            return [
+                'id' => $row->UserID,
+                'name' => $row->name,
+                'vorname' => $row->vorname,
+                'email' => $row->email,
+                'abteilungen' => $row->abteilung_name,
+                'abteilung_id' => $row->abteilung_id,
+                'aktuellerSatz' => $currentRate ? $currentRate->satz : null,
+                'gueltigSeit' => $currentRate ? $currentRate->gueltigVon : null,
+            ];
+        });
+
+        return response()->json($result);
     }
 }
