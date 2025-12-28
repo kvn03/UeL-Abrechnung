@@ -435,6 +435,8 @@ class GeschaeftsstelleController extends Controller
                 'abteilung_definition.name as abteilung_name',
                 'abteilung_definition.AbteilungID as abteilung_id'
             )
+            ->join('rolle_definition', 'user_rolle_abteilung.fk_rolleID', '=', 'rolle_definition.RolleID')
+            ->where('rolle_definition.bezeichnung', 'Uebungsleiter')
             // WICHTIG: distinct() sorgt dafür, dass User nur einmal pro Abteilung auftauchen,
             // auch wenn sie dort mehrere Rollen haben.
             ->distinct()
