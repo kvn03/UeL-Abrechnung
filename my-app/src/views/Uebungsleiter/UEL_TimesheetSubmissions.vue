@@ -18,6 +18,7 @@ interface Submission {
   zeitraum: string
   quartal_name: string
   stunden: number
+  gesamtBetrag: number // <--- NEU: Summe der Abrechnung
   status: string
   status_id: number
   datum_erstellt: string
@@ -44,6 +45,7 @@ interface DetailEntry {
   ende: string
   dauer: number
   kurs: string
+  betrag: number | null // <--- NEU: Betrag pro Eintrag
   history: HistoryEntry[]
 }
 
@@ -134,6 +136,12 @@ function formatDateDisplay(dateString: string) {
   })
 }
 
+// NEU: Währung formatieren
+function formatCurrency(val: number | null | undefined) {
+  if (val === null || val === undefined) return '-'
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(val)
+}
+
 onMounted(() => {
   fetchSubmissions()
 })
@@ -205,6 +213,7 @@ onMounted(() => {
               <th class="text-left">Zeitraum</th>
               <th class="text-left">Eingereicht am</th>
               <th class="text-right">Stunden</th>
+              <th class="text-right">Betrag</th>
               <th class="text-center">Status</th>
               <th class="text-right">Aktionen</th>
             </tr>
@@ -216,6 +225,9 @@ onMounted(() => {
               <td class="text-medium-emphasis">{{ item.zeitraum }}</td>
               <td class="text-medium-emphasis">{{ item.datum_erstellt }}</td>
               <td class="text-right">{{ item.stunden.toLocaleString('de-DE') }} Std.</td>
+              <td class="text-right font-weight-bold text-green-darken-2">
+                {{ formatCurrency(item.gesamtBetrag) }}
+              </td>
               <td class="text-center">
                 <v-chip
                     :color="getStatusColor(item.status_id)"
@@ -324,12 +336,15 @@ onMounted(() => {
                   <v-expansion-panel-title>
                     <v-row no-gutters align="center">
                       <v-col cols="3" class="font-weight-bold">{{ entry.datum }}</v-col>
-                      <v-col cols="4">{{ entry.kurs }}</v-col>
-                      <v-col cols="3" class="text-medium-emphasis text-caption">
-                        {{ entry.start }} - {{ entry.ende }} Uhr
+                      <v-col cols="3">{{ entry.kurs }}</v-col>
+                      <v-col cols="2" class="text-medium-emphasis text-caption">
+                        {{ entry.start }} - {{ entry.ende }}
                       </v-col>
-                      <v-col cols="2" class="text-right pr-4">
-                        <strong>{{ entry.dauer }} Std.</strong>
+                      <v-col cols="2" class="text-right pr-2">
+                        {{ entry.dauer }} Std.
+                      </v-col>
+                      <v-col cols="2" class="text-right pr-4 font-weight-medium text-green-darken-2">
+                        {{ formatCurrency(entry.betrag) }}
                       </v-col>
                     </v-row>
                   </v-expansion-panel-title>

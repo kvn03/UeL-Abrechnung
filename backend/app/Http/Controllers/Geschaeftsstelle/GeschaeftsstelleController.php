@@ -20,88 +20,96 @@ class GeschaeftsstelleController extends Controller
     /**
      * [GET] Geschäftsstelle: Alle Abrechnungen, die vom AL genehmigt wurden.
      */
+    /**
+     * [GET] Geschäftsstelle: Alle Abrechnungen, die vom AL genehmigt wurden (Status 21).
+     */
     public function getAbrechnungenFuerGeschaeftsstelle(Request $request)
     {
         $statusGenehmigtAL = 21;
 
-        $abrechnungen = Abrechnung::with([
+        // 1. Abrechnungen laden
+        $abrechnungen = \App\Models\Abrechnung::with([
             'creator',
             'abteilung',
             'stundeneintraege',
-            'quartal', // <--- WICHTIG: Relation laden
+            'quartal',
             'statusLogs' => function($q) {
                 $q->orderBy('modifiedAt', 'desc');
             },
             'statusLogs.modifier'
         ])->get();
 
+        // 2. Filtern: Nur die, wo der aktuelle Status 21 ist
         $filterteAbrechnungen = $abrechnungen->filter(function($a) use ($statusGenehmigtAL) {
             $neuestesLog = $a->statusLogs->first();
             return $neuestesLog && $neuestesLog->fk_statusID == $statusGenehmigtAL;
         });
 
+        // 3. Mapping & Berechnung
         $result = $filterteAbrechnungen->map(function($a) use ($statusGenehmigtAL) {
+
+            // Logik für Genehmiger
             $genehmigungsLog = $a->statusLogs->firstWhere('fk_statusID', $statusGenehmigtAL);
+            $genehmigerName = ($genehmigungsLog && $genehmigungsLog->modifier)
+                ? $genehmigungsLog->modifier->vorname . ' ' . $genehmigungsLog->modifier->name
+                : 'Unbekannt';
 
-            $genehmigerName = 'Unbekannt';
-            if ($genehmigungsLog && $genehmigungsLog->modifier) {
-                $genehmigerName = $genehmigungsLog->modifier->vorname . ' ' . $genehmigungsLog->modifier->name;
-            }
+            // --- STUNDENSÄTZE LADEN ---
+            // Wir laden die Sätze für diesen Mitarbeiter in dieser Abteilung
+            $rates = DB::table('stundensatz')
+                ->where('fk_userID', $a->createdBy)
+                ->where('fk_abteilungID', $a->fk_abteilung)
+                ->get();
 
-            // --- Quartal Logik ---
+            // --- DETAILS BERECHNEN ---
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+                $eintragDatum = \Carbon\Carbon::parse($e->datum)->startOfDay();
+
+                // Passenden Satz finden
+                $validRate = $rates->first(function($rate) use ($eintragDatum) {
+                    $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
+                    $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+                    return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
+                });
+
+                $satz = $validRate ? (float)$validRate->satz : 0;
+                $betrag = round($e->dauer * $satz, 2);
+
+                return [
+                    'EintragID' => $e->EintragID,
+                    'datum'     => $eintragDatum->format('Y-m-d'),
+                    'beginn'    => \Carbon\Carbon::parse($e->beginn)->format('H:i'),
+                    'ende'      => \Carbon\Carbon::parse($e->ende)->format('H:i'),
+                    'dauer'     => $e->dauer,
+                    'kurs'      => $e->kurs,
+                    'betrag'    => $betrag // <--- NEU
+                ];
+            });
+
+            // Gesamtbetrag summieren
+            $gesamtBetrag = $mappedDetails->sum('betrag');
+
+            // Metadaten
             $quartalName = $a->quartal ? $a->quartal->bezeichnung : '';
-            // ---------------------
+            $zeitraum = $a->quartal
+                ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
+                : 'Unbekannt';
 
             return [
-                'AbrechnungID' => $a->AbrechnungID,
-                'mitarbeiterName' => $a->creator->vorname . ' ' . $a->creator->name,
-                'abteilung' => $a->abteilung->name ?? 'Unbekannt',
-                'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
-
-                // Hier fügen wir das Quartal hinzu
-                'quartal' => $quartalName,
-
-                // Zeitraum kommt jetzt idealerweise aus dem Quartalsobjekt
-                'zeitraum' => $a->quartal
-                    ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
-                    : 'Unbekannt',
-
+                'AbrechnungID'     => $a->AbrechnungID,
+                'mitarbeiterName'  => $a->creator->vorname . ' ' . $a->creator->name,
+                'abteilung'        => $a->abteilung->name ?? 'Unbekannt',
+                'stunden'          => round($a->stundeneintraege->sum('dauer'), 2),
+                'gesamtBetrag'     => $gesamtBetrag, // <--- NEU
+                'quartal'          => $quartalName,
+                'zeitraum'         => $zeitraum,
                 'datumGenehmigtAL' => $genehmigungsLog ? \Carbon\Carbon::parse($genehmigungsLog->modifiedAt)->format('d.m.Y') : '-',
-                'genehmigtDurch' => $genehmigerName,
-                'details' => $a->stundeneintraege->map(function($e) {
-                    return [
-                        'EintragID'    => $e->EintragID,
-                        'datum' => \Carbon\Carbon::parse($e->datum)->format('Y-m-d'),
-                        'beginn' => \Carbon\Carbon::parse($e->beginn)->format('H:i'),
-                        'ende'   => \Carbon\Carbon::parse($e->ende)->format('H:i'),
-                        'dauer' => $e->dauer,
-                        'kurs'  => $e->kurs
-                    ];
-                })
+                'genehmigtDurch'   => $genehmigerName,
+                'details'          => $mappedDetails
             ];
         })->values();
 
         return response()->json($result);
-    }
-
-    /**
-     * [POST] Geschäftsstelle: Finale Freigabe (Auszahlung)
-     */
-    public function finalize(Request $request, $id)
-    {
-        $userId = Auth::id();
-        $abrechnung = Abrechnung::findOrFail($id);
-        $statusFinal = 22;
-
-        \App\Models\AbrechnungStatusLog::create([
-            'fk_abrechnungID' => $abrechnung->AbrechnungID,
-            'fk_statusID'     => $statusFinal,
-            'modifiedBy'      => $userId,
-            'modifiedAt'      => now(),
-            'kommentar'       => 'Finale Freigabe durch Geschäftsstelle'
-        ]);
-
-        return response()->json(['message' => 'Abrechnung final abgeschlossen.']);
     }
 
     /**

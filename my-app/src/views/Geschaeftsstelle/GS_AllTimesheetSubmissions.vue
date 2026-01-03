@@ -13,7 +13,7 @@ function goBack() {
 const API_BASE = 'http://127.0.0.1:8000/api'
 const API_URL = `${API_BASE}/geschaeftsstelle/abrechnungen`
 
-// --- TYPES ---
+// --- TYPES (Erweitert um Betrag) ---
 interface TimesheetEntry {
   EintragID: number
   datum: string
@@ -21,6 +21,7 @@ interface TimesheetEntry {
   ende: string
   dauer: number
   kurs: string
+  betrag: number | null // <--- NEU
   fk_abrechnungID?: number
 }
 
@@ -30,6 +31,7 @@ interface Submission {
   quartal: string
   zeitraum: string
   stunden: number
+  gesamtBetrag: number // <--- NEU
   datumGenehmigtAL: string
   genehmigtDurch: string
   details: TimesheetEntry[]
@@ -53,10 +55,7 @@ const showDialog = ref(false)
 const isEditMode = ref(false)
 const dialogLoading = ref(false)
 const dialogForm = ref<VForm | null>(null)
-
-// State für Änderungsprüfung
 const originalData = ref<any>(null)
-
 const currentSubmissionId = ref<number | null>(null)
 const currentEntryId = ref<number | null>(null)
 
@@ -67,17 +66,34 @@ const formData = ref({
   kurs: ''
 })
 
-// --- COMPUTED: PRÜFUNG AUF ÄNDERUNGEN ---
+// --- COMPUTED ---
 const hasChanges = computed(() => {
-  // Bei "Neu" (kein EditMode) ist immer eine Änderung da
   if (!isEditMode.value) return true
-
-  // Wenn keine Originaldaten da sind, sicherheitshalber false
   if (!originalData.value) return false
-
-  // Vergleich: Ist das JSON vom aktuellen Formular anders als das Original?
   return JSON.stringify(formData.value) !== JSON.stringify(originalData.value)
 })
+
+// --- HELPER: Währung ---
+function formatCurrency(val: number | null | undefined) {
+  if (val === null || val === undefined) return '-'
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(val)
+}
+
+// --- HELPER: Summe neu berechnen ---
+function recalculateTotal(submissionId: number) {
+  const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
+  if (subIndex === -1) return
+
+  const sub = submissions.value[subIndex]
+
+  // Stunden
+  const totalHours = sub.details.reduce((sum, entry) => sum + Number(entry.dauer), 0)
+  sub.stunden = parseFloat(totalHours.toFixed(2))
+
+  // Betrag
+  const totalMoney = sub.details.reduce((sum, entry) => sum + (Number(entry.betrag) || 0), 0)
+  sub.gesamtBetrag = parseFloat(totalMoney.toFixed(2))
+}
 
 // --- API: LADEN ---
 async function fetchReleaseSubmissions() {
@@ -88,6 +104,13 @@ async function fetchReleaseSubmissions() {
   try {
     const response = await axios.get<Submission[]>(API_URL)
     submissions.value = response.data
+
+    // Fallback Berechnung, falls Backend noch alt ist
+    submissions.value.forEach(s => {
+      if (s.gesamtBetrag === undefined) {
+        s.gesamtBetrag = s.details.reduce((acc, d) => acc + (d.betrag || 0), 0)
+      }
+    })
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.message || 'Fehler beim Laden der GS-Abrechnungen.'
   } finally {
@@ -153,79 +176,44 @@ async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
   }
 }
 
-// --- HELPER ---
-function recalculateTotal(submissionId: number) {
-  const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
-  if (subIndex === -1) return
-  const total = submissions.value[subIndex].details.reduce((sum, entry) => sum + Number(entry.dauer), 0)
-  submissions.value[subIndex].stunden = parseFloat(total.toFixed(2))
-}
-
-// --- AKTION: ÖFFNEN (Hinzufügen) ---
+// --- AKTIONEN: DIALOGE ---
 function openAddDialog(submissionId: number) {
   isEditMode.value = false
   currentSubmissionId.value = submissionId
   currentEntryId.value = null
-
-  formData.value = {
-    datum: new Date().toISOString().split('T')[0],
-    beginn: '',
-    ende: '',
-    kurs: ''
-  }
-  // Bei Neu gibt es keine Originaldaten zum Vergleich
+  formData.value = { datum: new Date().toISOString().split('T')[0], beginn: '', ende: '', kurs: '' }
   originalData.value = null
   showDialog.value = true
 }
 
-// --- AKTION: ÖFFNEN (Bearbeiten) ---
 function openEditDialog(entry: TimesheetEntry, submissionId: number) {
   isEditMode.value = true
   currentSubmissionId.value = submissionId
-
-  const id = entry.EintragID || (entry as any).id;
-  currentEntryId.value = id;
-
-  if (!id) {
-    alert("Fehler: Keine ID gefunden. Bearbeiten nicht möglich.");
-    return;
-  }
+  currentEntryId.value = entry.EintragID;
 
   const rawDate = entry.datum || '';
   const formattedDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
   const formatTime = (t: string) => (t && t.length >= 5) ? t.substring(0, 5) : '';
 
-  // 1. Formular befüllen
   formData.value = {
     datum: formattedDate,
     beginn: formatTime(entry.beginn),
     ende: formatTime(entry.ende),
     kurs: (entry.kurs === '-' || !entry.kurs) ? '' : entry.kurs
   }
-
-  // 2. Originalzustand speichern (Deep Copy)
   originalData.value = JSON.parse(JSON.stringify(formData.value))
-
   showDialog.value = true
 }
 
-// --- AKTION: SPEICHERN ---
 async function saveEntry() {
-  // Sicherheitscheck: Wenn Button disabled ist, passiert eh nichts,
-  // aber wir fangen es hier ab, ohne Alert.
   if (!hasChanges.value) return
-
   const { valid } = await dialogForm.value?.validate() || { valid: false }
   if (!valid) return
 
   dialogLoading.value = true
 
   try {
-    const payload = {
-      ...formData.value,
-      fk_abrechnungID: currentSubmissionId.value,
-      status_id: 21
-    }
+    const payload = { ...formData.value, fk_abrechnungID: currentSubmissionId.value, status_id: 21 }
 
     if (isEditMode.value) {
       if (!currentEntryId.value) throw new Error("ID fehlt");
@@ -236,11 +224,10 @@ async function saveEntry() {
       alert("Eintrag hinzugefügt")
     }
 
-    await fetchReleaseSubmissions()
+    await fetchReleaseSubmissions() // Lädt neu -> Berechnet Preis neu
     showDialog.value = false
 
   } catch (error: any) {
-    console.error(error)
     let msg = error.response?.data?.message || 'Fehler beim Speichern'
     alert(msg)
   } finally {
@@ -255,7 +242,6 @@ function toggleDetails(id: number) {
     expandedIds.value.push(id)
   }
 }
-
 const requiredRule = [(v: any) => !!v || 'Pflichtfeld']
 
 onMounted(() => {
@@ -314,8 +300,12 @@ onMounted(() => {
 
                 <div class="line">
                   <span class="label">Gesamt:</span>
-                  <span class="value font-weight-bold text-primary">
+                  <span class="value font-weight-bold">
                     {{ item.stunden.toLocaleString('de-DE') }} Std.
+                  </span>
+                  <span class="mx-2 text-medium-emphasis">|</span>
+                  <span class="value font-weight-bold text-success">
+                    {{ formatCurrency(item.gesamtBetrag) }}
                   </span>
                 </div>
 
@@ -329,29 +319,8 @@ onMounted(() => {
 
               <div class="submission-actions">
                 <v-icon :icon="expandedIds.includes(item.AbrechnungID) ? 'mdi-chevron-up' : 'mdi-chevron-down'" class="mr-4 text-medium-emphasis"></v-icon>
-
-                <v-btn
-                    size="small"
-                    color="error"
-                    variant="text"
-                    class="mr-2"
-                    @click.stop="openRejectDialog(item.AbrechnungID)"
-                    prepend-icon="mdi-close"
-                >
-                  Ablehnen
-                </v-btn>
-
-                <v-btn
-                    size="small"
-                    color="green-darken-1"
-                    variant="flat"
-                    :loading="isProcessingId === item.AbrechnungID"
-                    :disabled="isProcessingId !== null"
-                    @click.stop="approveSubmission(item.AbrechnungID)"
-                    prepend-icon="mdi-check-all"
-                >
-                  Final
-                </v-btn>
+                <v-btn size="small" color="error" variant="text" class="mr-2" @click.stop="openRejectDialog(item.AbrechnungID)" prepend-icon="mdi-close">Ablehnen</v-btn>
+                <v-btn size="small" color="green-darken-1" variant="flat" :loading="isProcessingId === item.AbrechnungID" :disabled="isProcessingId !== null" @click.stop="approveSubmission(item.AbrechnungID)" prepend-icon="mdi-check-all">Final</v-btn>
               </div>
             </div>
 
@@ -364,6 +333,7 @@ onMounted(() => {
                     <th class="text-left">Zeit</th>
                     <th class="text-left">Kurs/Info</th>
                     <th class="text-right">Dauer</th>
+                    <th class="text-right">Betrag</th>
                     <th class="text-right" style="width: 100px;">Aktionen</th>
                   </tr>
                   </thead>
@@ -373,37 +343,16 @@ onMounted(() => {
                     <td>{{ detail.beginn }} - {{ detail.ende }}</td>
                     <td>{{ detail.kurs }}</td>
                     <td class="text-right">{{ detail.dauer }} Std.</td>
+                    <td class="text-right font-weight-medium">{{ formatCurrency(detail.betrag) }}</td>
                     <td class="text-right">
-                      <v-btn
-                          icon="mdi-pencil"
-                          size="x-small"
-                          variant="text"
-                          color="blue"
-                          class="mr-1"
-                          @click="openEditDialog(detail, item.AbrechnungID)"
-                      ></v-btn>
-                      <v-btn
-                          icon="mdi-delete"
-                          size="x-small"
-                          variant="text"
-                          color="red"
-                          @click="deleteEntry(detail, item.AbrechnungID)"
-                      ></v-btn>
+                      <v-btn icon="mdi-pencil" size="x-small" variant="text" color="blue" class="mr-1" @click="openEditDialog(detail, item.AbrechnungID)"></v-btn>
+                      <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="deleteEntry(detail, item.AbrechnungID)"></v-btn>
                     </td>
                   </tr>
                   </tbody>
                 </v-table>
-
                 <div class="d-flex justify-start">
-                  <v-btn
-                      size="small"
-                      variant="tonal"
-                      prepend-icon="mdi-plus"
-                      color="blue-grey"
-                      @click="openAddDialog(item.AbrechnungID)"
-                  >
-                    Stunde hinzufügen
-                  </v-btn>
+                  <v-btn size="small" variant="tonal" prepend-icon="mdi-plus" color="blue-grey" @click="openAddDialog(item.AbrechnungID)">Stunde hinzufügen</v-btn>
                 </div>
               </div>
             </v-expand-transition>
@@ -419,9 +368,7 @@ onMounted(() => {
 
     <v-dialog v-model="showDialog" max-width="500px">
       <v-card>
-        <v-card-title>
-          {{ isEditMode ? 'Eintrag bearbeiten' : 'Neuen Eintrag hinzufügen' }}
-        </v-card-title>
+        <v-card-title>{{ isEditMode ? 'Eintrag bearbeiten' : 'Neuen Eintrag hinzufügen' }}</v-card-title>
         <v-card-text>
           <v-form ref="dialogForm" @submit.prevent="saveEntry">
             <v-text-field v-model="formData.datum" label="Datum" type="date" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
@@ -435,15 +382,7 @@ onMounted(() => {
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn color="grey" variant="text" @click="showDialog = false">Abbrechen</v-btn>
-          <v-btn
-              color="primary"
-              variant="flat"
-              :loading="dialogLoading"
-              :disabled="!hasChanges"
-              @click="saveEntry"
-          >
-            Speichern
-          </v-btn>
+          <v-btn color="primary" variant="flat" :loading="dialogLoading" :disabled="!hasChanges" @click="saveEntry">Speichern</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -452,11 +391,8 @@ onMounted(() => {
       <v-card>
         <v-card-title class="text-error">Abrechnung ablehnen</v-card-title>
         <v-card-text>
-          <p class="text-body-2 mb-4">
-            Bitte gib eine Begründung an, warum diese Abrechnung von der Geschäftsstelle abgelehnt wird.
-            Der Status wird zurückgesetzt.
-          </p>
-          <v-textarea v-model="rejectReason" label="Begründung für Ablehnung" variant="outlined" auto-grow rows="3" :rules="[v => !!v || 'Begründung ist erforderlich']"></v-textarea>
+          <p class="text-body-2 mb-4">Bitte gib eine Begründung an.</p>
+          <v-textarea v-model="rejectReason" label="Begründung für Ablehnung" variant="outlined" auto-grow rows="3" :rules="[v => !!v || 'Erforderlich']"></v-textarea>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
@@ -470,83 +406,19 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.page {
-  padding: 24px;
-  max-width: 800px;
-  margin: 0 auto;
-}
-.border-t-lg-green {
-  border-top: 4px solid #43A047;
-}
-.placeholder {
-  min-height: 220px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 1rem;
-  border-radius: 8px;
-  background: rgba(0,0,0,0.02);
-  margin-top: 8px;
-  padding: 16px;
-  text-align: center;
-}
-.list {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.submission-wrapper {
-  background: white;
-  border: 1px solid rgba(0,0,0,0.12);
-  border-radius: 8px;
-  overflow: hidden;
-  transition: box-shadow 0.2s;
-}
-.submission-wrapper:hover {
-  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-}
-.submission-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  cursor: pointer;
-}
-.submission-row:hover {
-  background-color: #f9f9f9;
-}
-.submission-main {
-  flex: 1;
-}
-.line {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.border-top {
-  border-top: 1px solid rgba(0,0,0,0.08);
-}
-.label {
-  min-width: 120px;
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 0.9rem;
-}
-.value {
-  font-weight: 400;
-  color: rgba(0, 0, 0, 0.87);
-}
-.submission-actions {
-  display: flex;
-  align-items: center;
-  margin-left: 24px;
-}
-.details-container {
-  background-color: #fafafa;
-  border-top: 1px solid rgba(0,0,0,0.06);
-  padding: 16px;
-}
+.page { padding: 24px; max-width: 800px; margin: 0 auto; }
+.border-t-lg-green { border-top: 4px solid #43A047; }
+.placeholder { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(0, 0, 0, 0.6); font-size: 1rem; border-radius: 8px; background: rgba(0,0,0,0.02); margin-top: 8px; padding: 16px; text-align: center; }
+.list { margin-top: 8px; display: flex; flex-direction: column; gap: 12px; }
+.submission-wrapper { background: white; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; overflow: hidden; transition: box-shadow 0.2s; }
+.submission-wrapper:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+.submission-row { display: flex; justify-content: space-between; align-items: center; padding: 16px; cursor: pointer; }
+.submission-row:hover { background-color: #f9f9f9; }
+.submission-main { flex: 1; }
+.line { display: flex; gap: 8px; margin-bottom: 6px; }
+.border-top { border-top: 1px solid rgba(0,0,0,0.08); }
+.label { min-width: 120px; font-weight: 500; color: rgba(0, 0, 0, 0.6); font-size: 0.9rem; }
+.value { font-weight: 400; color: rgba(0, 0, 0, 0.87); }
+.submission-actions { display: flex; align-items: center; margin-left: 24px; }
+.details-container { background-color: #fafafa; border-top: 1px solid rgba(0,0,0,0.06); padding: 16px; }
 </style>

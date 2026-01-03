@@ -129,30 +129,53 @@ class AbrechnungController extends Controller
 
         $abrechnungen = Abrechnung::where('createdBy', $userId)
             ->with([
-                'quartal',            // <--- WICHTIG: Relation laden
+                'quartal',
                 'stundeneintraege',
                 'statusLogs.statusDefinition'
             ])
             ->orderBy('createdAt', 'desc')
             ->get();
 
-        $result = $abrechnungen->map(function($a) {
+        $result = $abrechnungen->map(function($a) use ($userId) {
+
+            // --- NEU: Berechnung Gesamtbetrag ---
+            // 1. Sätze laden für diesen User in der Abteilung der Abrechnung
+            $rates = DB::table('stundensatz')
+                ->where('fk_userID', $userId)
+                ->where('fk_abteilungID', $a->fk_abteilung)
+                ->get();
+
+            // 2. Summe berechnen
+            $gesamtBetrag = $a->stundeneintraege->sum(function($eintrag) use ($rates) {
+                $datum = \Carbon\Carbon::parse($eintrag->datum)->startOfDay();
+
+                // Passenden Satz finden
+                $validRate = $rates->first(function($rate) use ($datum) {
+                    $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
+                    $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+                    return $datum->gte($start) && ($end === null || $datum->lte($end));
+                });
+
+                $satz = $validRate ? (float)$validRate->satz : 0;
+                return round($eintrag->dauer * $satz, 2);
+            });
+            // ------------------------------------
+
             $neuestesLog = $a->statusLogs->sortByDesc('modifiedAt')->first();
             $statusName = $neuestesLog ? $neuestesLog->statusDefinition->name : 'Unbekannt';
             $statusId   = $neuestesLog ? $neuestesLog->fk_statusID : 0;
 
-            // Zeitraum kommt jetzt aus dem Quartal Model
             $zeitraumString = 'Unbekannt';
             if ($a->quartal) {
-                // Zugriff auf Carbon Objekte dank Casts im Model
                 $zeitraumString = $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y');
             }
 
             return [
                 'id' => $a->AbrechnungID,
-                'zeitraum' => $zeitraumString, // <--- Angepasst
-                'quartal_name' => $a->quartal ? $a->quartal->bezeichnung : 'N/A', // Optional, falls du "Q1 2024" anzeigen willst
+                'zeitraum' => $zeitraumString,
+                'quartal_name' => $a->quartal ? $a->quartal->bezeichnung : 'N/A',
                 'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
+                'gesamtBetrag' => $gesamtBetrag, // <--- NEU: Ins Frontend schicken
                 'status' => $statusName,
                 'status_id' => $statusId,
                 'datum_erstellt' => $a->createdAt->format('d.m.Y'),
@@ -168,8 +191,7 @@ class AbrechnungController extends Controller
     {
         $userId = Auth::id();
 
-        // 1. Abrechnung laden und prüfen
-        // NEU: Wir laden hier auch 'statusLogs.statusDefinition' der Abrechnung!
+        // 1. Abrechnung laden
         $abrechnung = Abrechnung::where('AbrechnungID', $id)
             ->where('createdBy', $userId)
             ->with(['quartal', 'statusLogs.statusDefinition'])
@@ -179,31 +201,44 @@ class AbrechnungController extends Controller
             return response()->json(['message' => 'Abrechnung nicht gefunden'], 404);
         }
 
-        // 2. Abrechnungs-Historie formatieren (NEU)
+        // --- NEU: Stundensätze laden (einmalig für die Abrechnung) ---
+        $rates = DB::table('stundensatz')
+            ->where('fk_userID', $userId)
+            ->where('fk_abteilungID', $abrechnung->fk_abteilung)
+            ->get();
+        // -------------------------------------------------------------
+
+        // 2. Historie (bleibt gleich)
         $abrechnungHistory = $abrechnung->statusLogs ? $abrechnung->statusLogs->map(function ($log) {
             return [
-                'date'       => $log->modifiedAt, // String (da kein Cast im Model) oder Obj
+                'date'       => $log->modifiedAt,
                 'user_id'    => $log->modifiedBy,
                 'title'      => $log->statusDefinition->name ?? 'Status geändert',
                 'kommentar'  => $log->kommentar
             ];
         })->sortByDesc('date')->values() : [];
 
-        // 3. Stundeneinträge laden
+        // 3. Einträge laden
         $eintraege = Stundeneintrag::where('fk_abrechnungID', $abrechnung->AbrechnungID)
-            ->with([
-                'auditLogs',
-                'statusLogs.statusDefinition'
-            ])
+            ->with(['auditLogs', 'statusLogs.statusDefinition'])
             ->orderBy('datum', 'asc')
             ->get();
 
-        // 4. Stundeneinträge formatieren (Wie vorher)
-        $eintraegeFormatted = $eintraege->map(function ($eintrag) {
-            // (Hier bleibt dein bestehender Code für Audit/Status Logs der Einträge)
-            // ... Copy & Paste aus deinem funktionierenden Code oder siehe unten ...
+        // 4. Einträge formatieren & PREIS BERECHNEN
+        $eintraegeFormatted = $eintraege->map(function ($eintrag) use ($rates) {
 
-            // Kurzfassung der Logik von vorhin:
+            // --- NEU: Preisberechnung pro Eintrag ---
+            $datum = \Carbon\Carbon::parse($eintrag->datum)->startOfDay();
+            $validRate = $rates->first(function($rate) use ($datum) {
+                $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
+                $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+                return $datum->gte($start) && ($end === null || $datum->lte($end));
+            });
+            $satz = $validRate ? (float)$validRate->satz : 0;
+            $betrag = round($eintrag->dauer * $satz, 2);
+            // ----------------------------------------
+
+            // ... (Hier dein bestehender Code für Audit/Status Logs) ...
             $audits = $eintrag->auditLogs ? $eintrag->auditLogs->map(function ($log) {
                 return [
                     'type' => 'audit', 'date' => $log->modifiedAt,
@@ -222,20 +257,14 @@ class AbrechnungController extends Controller
 
             $history = $audits->concat($statuses)->sortByDesc('date')->values();
 
-            $datumFormatted = $eintrag->datum
-                ? \Carbon\Carbon::parse($eintrag->datum)->format('d.m.Y') : '-';
-            $startFormatted = $eintrag->beginn
-                ? \Carbon\Carbon::parse($eintrag->beginn)->format('H:i') : '-';
-            $endeFormatted  = $eintrag->ende
-                ? \Carbon\Carbon::parse($eintrag->ende)->format('H:i') : '-';
-
             return [
                 'id' => $eintrag->EintragID,
-                'datum' => $datumFormatted,
-                'start' => $startFormatted,
-                'ende'  => $endeFormatted,
+                'datum' => \Carbon\Carbon::parse($eintrag->datum)->format('d.m.Y'),
+                'start' => \Carbon\Carbon::parse($eintrag->beginn)->format('H:i'),
+                'ende'  => \Carbon\Carbon::parse($eintrag->ende)->format('H:i'),
                 'dauer' => (float) $eintrag->dauer,
                 'kurs'  => $eintrag->kurs ?? '',
+                'betrag' => $betrag, // <--- NEU: Ins Frontend schicken
                 'history' => $history
             ];
         });
@@ -243,7 +272,6 @@ class AbrechnungController extends Controller
         return response()->json([
             'abrechnung_id' => $abrechnung->AbrechnungID,
             'quartal' => $abrechnung->quartal ? $abrechnung->quartal->bezeichnung : '-',
-            // NEU: Wir geben die History der Abrechnung zurück
             'abrechnung_history' => $abrechnungHistory,
             'eintraege' => $eintraegeFormatted
         ]);

@@ -295,78 +295,109 @@ class AbteilungsleiterController extends Controller
      */
     public function getOffeneAbrechnungen(Request $request)
     {
-        $userId = Auth::id();
+        try {
+            $userId = Auth::id();
 
-        // 1. Herausfinden, welche Abteilungen dieser User leitet
-        $managedAbteilungIds = \App\Models\UserRolleAbteilung::where('fk_userID', $userId)
-            ->whereHas('rolle', function($q) {
-                $q->where('bezeichnung', 'Abteilungsleiter');
-            })
-            ->pluck('fk_abteilungID');
+            // 1. Abteilungen des AL laden
+            $managedAbteilungIds = UserRolleAbteilung::where('fk_userID', $userId)
+                ->whereHas('rolle', function($q) {
+                    $q->where('bezeichnung', 'Abteilungsleiter');
+                })
+                ->pluck('fk_abteilungID');
 
-        if ($managedAbteilungIds->isEmpty()) {
-            return response()->json([]);
-        }
-
-        // 2. Abrechnungen laden (JETZT MIT QUARTAL)
-        $abrechnungen = Abrechnung::whereIn('fk_abteilung', $managedAbteilungIds)
-            ->with([
-                'creator',
-                'stundeneintraege',
-                'quartal', // <--- WICHTIG: Hier das Quartal mitladen
-                'statusLogs' => function($q) { $q->orderBy('modifiedAt', 'desc'); },
-            ])
-            ->get();
-
-        // 3. Filtern (Status 20 = Erstellt/Offen für AL)
-        // Hinweis: Prüfe kurz in deiner DB, ob Status 20 wirklich der ist,
-        // den die Abrechnung direkt nach dem Einreichen hat (manchmal ist es 11 oder ähnlich).
-        $offeneAbrechnungen = $abrechnungen->filter(function($abrechnung) {
-            $neuestesLog = $abrechnung->statusLogs->first();
-            return $neuestesLog && $neuestesLog->fk_statusID == 20;
-        });
-
-        // 4. Daten formatieren
-        $result = $offeneAbrechnungen->map(function($a) {
-
-            // --- NEU: Quartalsdaten sicher abrufen ---
-            $quartalName = 'Unbekannt';
-            $zeitraumString = 'Unbekannt';
-
-            if ($a->quartal) {
-                // Falls du den "getBezeichnungAttribute" Accessor im Model hast:
-                $quartalName = $a->quartal->bezeichnung;
-
-                // Zeitraum aus dem Quartal-Model holen
-                $zeitraumString = $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y');
+            if ($managedAbteilungIds->isEmpty()) {
+                return response()->json([]);
             }
-            // -----------------------------------------
 
-            return [
-                'AbrechnungID' => $a->AbrechnungID,
-                'mitarbeiterName' => $a->creator ? ($a->creator->vorname . ' ' . $a->creator->name) : 'Unbekannt',
+            // 2. Abrechnungen laden
+            $abrechnungen = Abrechnung::whereIn('fk_abteilung', $managedAbteilungIds)
+                ->with([
+                    'creator',
+                    'stundeneintraege',
+                    'quartal',
+                    'statusLogs' => function($q) { $q->orderBy('modifiedAt', 'desc'); },
+                ])
+                ->get();
 
-                // Hier die neuen Variablen nutzen:
-                'quartal' => $quartalName,
-                'zeitraum' => $zeitraumString,
+            // 3. Nur Status 20 (Offen für AL) filtern
+            $offeneAbrechnungen = $abrechnungen->filter(function($abrechnung) {
+                $neuestesLog = $abrechnung->statusLogs->first();
+                return $neuestesLog && $neuestesLog->fk_statusID == 20;
+            });
 
-                'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
-                'datumEingereicht' => $a->createdAt->format('d.m.Y'),
+            // 4. Daten mappen
+            $result = $offeneAbrechnungen->map(function($a) {
 
-                'details' => $a->stundeneintraege->map(function($eintrag) {
+                // --- A. Stundensätze laden ---
+                // Wir suchen Sätze für den Ersteller (createdBy) in DIESER Abteilung
+                $rates = DB::table('stundensatz')
+                    ->where('fk_userID', $a->createdBy)
+                    ->where('fk_abteilungID', $a->fk_abteilung)
+                    ->get();
+
+                // --- B. Details berechnen ---
+                $mappedDetails = $a->stundeneintraege->map(function($eintrag) use ($rates) {
+
+                    // Datum sicher parsen (Start des Tages für sauberen Vergleich)
+                    $eintragDatum = Carbon::parse($eintrag->datum)->startOfDay();
+
+                    // Passenden Satz suchen
+                    $validRate = $rates->first(function($rate) use ($eintragDatum) {
+                        $start = Carbon::parse($rate->gueltigVon)->startOfDay();
+                        $end   = $rate->gueltigBis ? Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+
+                        // Check: Datum >= Start UND (Kein Ende ODER Datum <= Ende)
+                        return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
+                    });
+
+                    // Falls kein Satz gefunden wurde -> 0 (Oder hier einen Standardwert setzen zum Testen)
+                    $stundensatz = $validRate ? (float)$validRate->satz : 0;
+
+                    // Sicherheitshalber runden
+                    $betrag = round($eintrag->dauer * $stundensatz, 2);
+
                     return [
                         'EintragID' => $eintrag->EintragID,
-                        'datum' => \Carbon\Carbon::parse($eintrag->datum)->format('Y-m-d'),
-                        'beginn' => \Carbon\Carbon::parse($eintrag->beginn)->format('H:i'),
-                        'ende'   => \Carbon\Carbon::parse($eintrag->ende)->format('H:i'),
-                        'dauer'  => $eintrag->dauer,
-                        'kurs'   => $eintrag->kurs,
+                        'datum'     => $eintragDatum->format('Y-m-d'),
+                        'beginn'    => Carbon::parse($eintrag->beginn)->format('H:i'),
+                        'ende'      => Carbon::parse($eintrag->ende)->format('H:i'),
+                        'dauer'     => $eintrag->dauer,
+                        'kurs'      => $eintrag->kurs,
+                        'betrag'    => $betrag,
+                        // Optional für Debugging im Frontend:
+                        // 'debug_satz' => $stundensatz
                     ];
-                }),
-            ];
-        })->values();
+                });
 
-        return response()->json($result);
+                // C. Metadaten
+                $quartalName = $a->quartal ? $a->quartal->bezeichnung : 'Unbekannt';
+                $zeitraumString = $a->quartal
+                    ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
+                    : '-';
+
+                return [
+                    'AbrechnungID'     => $a->AbrechnungID,
+                    'mitarbeiterName'  => $a->creator ? ($a->creator->vorname . ' ' . $a->creator->name) : 'Unbekannt',
+                    'quartal'          => $quartalName,
+                    'zeitraum'         => $zeitraumString,
+                    'stunden'          => round($a->stundeneintraege->sum('dauer'), 2),
+                    'gesamtBetrag'     => $mappedDetails->sum('betrag'),
+                    'datumEingereicht' => $a->createdAt ? $a->createdAt->format('d.m.Y') : '-',
+                    'details'          => $mappedDetails,
+                ];
+            })->values();
+
+            return response()->json($result);
+
+        } catch (\Exception $e) {
+            // Zeigt dir den genauen Fehler an, falls es kracht
+            return response()->json([
+                'message' => 'Fehler in getOffeneAbrechnungen',
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ], 500);
+        }
     }
 
     /**
