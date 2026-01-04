@@ -46,7 +46,7 @@ class AbteilungsleiterController extends Controller
             'datum'           => 'required|date',
             'beginn'          => 'required|date_format:H:i',
             'ende'            => 'required|date_format:H:i|after:beginn',
-            'kurs'            => 'nullable|string',
+            'kurs'            => 'required|string',
             'fk_abteilung'    => 'nullable|exists:abteilung_definition,AbteilungID',
             'fk_abrechnungID' => 'required|exists:abrechnung,AbrechnungID',
             'status_id'       => 'required|integer',
@@ -486,5 +486,119 @@ class AbteilungsleiterController extends Controller
         } catch (\Exception $e) {
             return response()->json(['message' => 'Fehler beim Ablehnen: ' . $e->getMessage()], 500);
         }
+    }
+    /**
+     * [GET] Abteilungsleiter: Historie / Archiv
+     * Zeigt ALLE Abrechnungen (Status egal), aber NUR für Abteilungen, die er leitet.
+     */
+    public function getAbrechnungenHistorie(Request $request)
+    {
+        $userId = Auth::id();
+        $year = (int) $request->query('year', Carbon::now()->year);
+        $quarter = $request->query('quarter');
+
+        // 1. Welche Abteilungen leitet dieser User?
+        $managedAbteilungIds = \App\Models\UserRolleAbteilung::where('fk_userID', $userId)
+            ->whereHas('rolle', function($q) {
+                $q->where('bezeichnung', 'Abteilungsleiter');
+            })
+            ->pluck('fk_abteilungID');
+
+        if ($managedAbteilungIds->isEmpty()) {
+            return response()->json([]);
+        }
+
+        // 2. Zeitraum bestimmen
+        if ($quarter === 'Q1') {
+            $start = Carbon::create($year, 1, 1)->startOfDay();
+            $end   = Carbon::create($year, 3, 31)->endOfDay();
+        } elseif ($quarter === 'Q2') {
+            $start = Carbon::create($year, 4, 1)->startOfDay();
+            $end   = Carbon::create($year, 6, 30)->endOfDay();
+        } elseif ($quarter === 'Q3') {
+            $start = Carbon::create($year, 7, 1)->startOfDay();
+            $end   = Carbon::create($year, 9, 30)->endOfDay();
+        } elseif ($quarter === 'Q4') {
+            $start = Carbon::create($year, 10, 1)->startOfDay();
+            $end   = Carbon::create($year, 12, 31)->endOfDay();
+        } else {
+            $start = Carbon::create($year, 1, 1)->startOfDay();
+            $end   = Carbon::create($year, 12, 31)->endOfDay();
+        }
+
+        // 3. Daten laden (Gefiltert auf Abteilung!)
+        $abrechnungen = Abrechnung::whereIn('fk_abteilung', $managedAbteilungIds)
+            ->with([
+                'creator',
+                'abteilung',
+                'stundeneintraege',
+                'quartal',
+                'statusLogs.statusDefinition',
+                'statusLogs.modifier'
+            ])
+            ->whereHas('quartal', function ($q) use ($start, $end) {
+                $q->whereBetween('beginn', [$start, $end])
+                    ->orWhereBetween('ende', [$start, $end]);
+            })
+            ->orderBy('AbrechnungID', 'desc')
+            ->get();
+
+        // 4. Mapping & Preisberechnung (Identisch zur GS)
+        $result = $abrechnungen->map(function ($a) {
+
+            $latestLog = $a->statusLogs->sortByDesc('modifiedAt')->first();
+            $statusName = $latestLog && $latestLog->statusDefinition ? $latestLog->statusDefinition->name : 'Unbekannt';
+            $statusId = $latestLog ? $latestLog->fk_statusID : 0;
+
+            $rates = DB::table('stundensatz')
+                ->where('fk_userID', $a->createdBy)
+                ->where('fk_abteilungID', $a->fk_abteilung)
+                ->get();
+
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+                $eintragDatum = Carbon::parse($e->datum)->startOfDay();
+                $validRate = $rates->first(function($rate) use ($eintragDatum) {
+                    $start = Carbon::parse($rate->gueltigVon)->startOfDay();
+                    $end   = $rate->gueltigBis ? Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+                    return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
+                });
+                $satz = $validRate ? (float)$validRate->satz : 0;
+                $betrag = round($e->dauer * $satz, 2);
+
+                return [
+                    'datum'  => $e->datum,
+                    'dauer'  => $e->dauer,
+                    'kurs'   => $e->kurs,
+                    'betrag' => $betrag
+                ];
+            });
+
+            $zeitraumText = $a->quartal
+                ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
+                : '-';
+
+            return [
+                'AbrechnungID'    => $a->AbrechnungID,
+                'mitarbeiterName' => $a->creator->vorname . ' ' . $a->creator->name,
+                'abteilung'       => $a->abteilung->name ?? 'Unbekannt',
+                'stunden'         => round($a->stundeneintraege->sum('dauer'), 2),
+                'gesamtBetrag'    => $mappedDetails->sum('betrag'),
+                'zeitraum'        => $zeitraumText,
+                'quartal'         => $a->quartal ? $a->quartal->bezeichnung : '',
+                'status'          => $statusName,
+                'status_id'       => $statusId,
+                'details'         => $mappedDetails,
+                'history' => $a->statusLogs->sortByDesc('modifiedAt')->map(function($log) {
+                    return [
+                        'date' => Carbon::parse($log->modifiedAt)->format('d.m.Y H:i'),
+                        'status' => $log->statusDefinition->name ?? 'Status',
+                        'user' => $log->modifier ? ($log->modifier->vorname.' '.$log->modifier->name) : 'System',
+                        'kommentar' => $log->kommentar
+                    ];
+                })->values()
+            ];
+        })->values();
+
+        return response()->json($result);
     }
 }

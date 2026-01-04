@@ -42,6 +42,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
     Route::post('/uebungsleiter/profil', [StammdatenController::class, 'updateProfile']);
     Route::get('/admin/users', [AuthController::class, 'listUsers']);
     Route::put('/admin/users/{id}/roles', [AuthController::class, 'updateUserRoles']);
+    Route::get('/uebungsleiter/meine-saetze', [App\Http\Controllers\Uebungsleiter\AbrechnungController::class, 'getMeineSaetze']);
     //Geschäftsstelle-Routen
     Route::group(['middleware' => ['gs']], function ()
     {
@@ -54,6 +55,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::post('/geschaeftsstelle/abrechnungen/{id}/reject', [GeschaeftsstelleController::class, 'reject']);
         Route::get('/geschaeftsstelle/mitarbeiter', [GeschaeftsstelleController::class, 'getAllMitarbeiter']);
         Route::post('/geschaeftsstelle/stundensatz', [StundensatzController::class, 'updateStundensatz']);
+        Route::get('/geschaeftsstelle/stundensatz-historie', [GeschaeftsstelleController::class, 'getStundensatzHistorie']);
+        Route::get('/geschaeftsstelle/auszahlungen', [GeschaeftsstelleController::class, 'getAuszahlungen']);
     });
     //Abteilungsleiter-Routen
     Route::group(['middleware' => ['al']], function ()
@@ -67,6 +70,8 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/abteilungsleiter/mitarbeiter', [StundensatzController::class, 'getMitarbeiter']);
         Route::post('/abteilungsleiter/stundensatz', [StundensatzController::class, 'updateStundensatz']);
         Route::get('/meine-al-abteilungen', [AbteilungController::class, 'getMeineLeiterAbteilungen']);
+        Route::get('/abteilungsleiter/stundensatz-historie', [StundensatzController::class, 'getStundensatzHistorie']);
+        Route::get('/abteilungsleiter/abrechnungen-historie', [App\Http\Controllers\Abteilungsleiter\AbteilungsleiterController::class, 'getAbrechnungenHistorie']);
     });
     //Admin-Routen
     Route::group(['middleware' => ['admin']], function ()

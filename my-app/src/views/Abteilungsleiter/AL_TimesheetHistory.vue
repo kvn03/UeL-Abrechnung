@@ -9,7 +9,8 @@ function goBack() {
   router.push({ name: 'Dashboard' })
 }
 
-const API_URL = 'http://127.0.0.1:8000/api/geschaeftsstelle/abrechnungen-historie'
+// WICHTIG: Hier auf den AL-Endpunkt zeigen
+const API_URL = 'http://127.0.0.1:8000/api/abteilungsleiter/abrechnungen-historie'
 
 // --- Interfaces ---
 interface HistoryEntry {
@@ -106,17 +107,11 @@ function formatDate(dateStr: string) {
 }
 
 function getStatusColor(id: number) {
-  // Annahme der Status-IDs (anpassen falls anders)
-  // 11 = Eingereicht (ÜL)
-  // 20/21 = Genehmigungsprozess
-  // 22 = Warten auf Zahlung
-  // 23 = Bezahlt / Abgeschlossen
-  // 12/24 = Abgelehnt / Storniert
-
   if (id === 23) return 'green' // Bezahlt
   if (id === 22) return 'orange-darken-1' // Warten auf Zahlung
   if (id === 21) return 'blue' // Genehmigt AL
-  if (id === 12 || id === 24) return 'red' // Abgelehnt
+  if (id === 20) return 'indigo' // Offen für AL
+  if (id === 12 || id === 24) return 'red' // Abgelehnt / Storniert
   return 'grey'
 }
 
@@ -136,9 +131,9 @@ onMounted(() => {
     <v-card elevation="6" class="pa-4">
       <v-card-title class="pa-0 mb-4 d-flex flex-column flex-sm-row align-sm-center justify-space-between">
         <div>
-          <h3 class="ma-0">Archiv (Geschäftsstelle)</h3>
+          <h3 class="ma-0">Archiv (Abteilungsleiter)</h3>
           <div class="text-body-2 text-medium-emphasis mt-1">
-            Vollständiges Archiv aller Abrechnungen (nur lesend).
+            Vollständiges Archiv deiner Abteilungen (nur lesend).
           </div>
         </div>
 

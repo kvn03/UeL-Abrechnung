@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import type { VForm } from 'vuetify/components'
@@ -12,13 +12,23 @@ interface Department {
   name: string
 }
 
+// Typ für einen historischen Eintrag
+interface RateHistoryEntry {
+  satz: number
+  gueltigVon: string
+  gueltigBis: string | null
+}
+
 interface UserWithRate {
   id: number
   name: string
   vorname: string
   email: string
-  aktuellerSatz: number | null // null, wenn noch kein Satz existiert
+  aktuellerSatz: number | null
   gueltigSeit: string | null
+  // NEU: Hier speichern wir die Historie, sobald sie geladen wurde
+  history?: RateHistoryEntry[]
+  isLoadingHistory?: boolean
 }
 
 // --- State ---
@@ -30,6 +40,9 @@ const users = ref<UserWithRate[]>([])
 const errorMessage = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 
+// NEU: State für aufgeklappte Zeilen
+const expanded = ref<string[]>([])
+
 // Dialog State
 const showDialog = ref(false)
 const editForm = ref<VForm | null>(null)
@@ -37,17 +50,18 @@ const selectedUser = ref<UserWithRate | null>(null)
 const newRate = ref<number | string>('')
 const validFrom = ref<string>('')
 
-// --- API Endpoints (anpassen wenn nötig) ---
-const API_DEPARTMENTS = 'http://127.0.0.1:8000/api/meine-al-abteilungen' // Oder spezieller AL-Endpoint
-const API_USERS = 'http://127.0.0.1:8000/api/abteilungsleiter/mitarbeiter' // Neuer Endpoint nötig (siehe unten)
-const API_UPDATE_RATE = 'http://127.0.0.1:8000/api/abteilungsleiter/stundensatz' // Neuer Endpoint
+// --- API Endpoints ---
+const API_DEPARTMENTS = 'http://127.0.0.1:8000/api/meine-al-abteilungen'
+const API_USERS = 'http://127.0.0.1:8000/api/abteilungsleiter/mitarbeiter'
+const API_UPDATE_RATE = 'http://127.0.0.1:8000/api/abteilungsleiter/stundensatz'
+// NEU: Endpoint für Historie (Beispiel)
+const API_HISTORY = 'http://127.0.0.1:8000/api/abteilungsleiter/stundensatz-historie'
 
 // --- Initialisierung ---
 onMounted(async () => {
   await loadDepartments()
 })
 
-// Wenn Abteilung gewechselt wird, User neu laden
 watch(selectedDepartment, async (newVal) => {
   if (newVal) {
     await loadUsers(newVal)
@@ -61,7 +75,6 @@ async function loadDepartments() {
   try {
     const response = await axios.get(API_DEPARTMENTS)
     departments.value = response.data
-    // Wähle automatisch die erste Abteilung, falls vorhanden
     if (departments.value.length > 0) {
       selectedDepartment.value = departments.value[0].id
     }
@@ -74,8 +87,8 @@ async function loadDepartments() {
 async function loadUsers(deptId: number) {
   isLoading.value = true
   errorMessage.value = null
+  expanded.value = [] // Alle zugeklappten Zeilen resetten
   try {
-    // Backend muss hier User der Abteilung + deren aktuellen Stundensatz liefern
     const response = await axios.get(`${API_USERS}?abteilung_id=${deptId}`)
     users.value = response.data
   } catch (e) {
@@ -86,12 +99,39 @@ async function loadUsers(deptId: number) {
   }
 }
 
+// NEU: Historie laden, wenn Zeile aufgeklappt wird
+async function loadHistoryForUser(item: any) {
+  // item ist hier das Objekt aus der Row, aber Vorsicht bei Reactivity:
+  // Wir suchen das Objekt in unserem users-Array
+  const user = users.value.find(u => u.id === item.id)
+  if (!user) return
+
+  // Wenn wir die Historie schon haben, nicht nochmal laden
+  if (user.history) return
+
+  user.isLoadingHistory = true
+  try {
+    // Backend Call: Wir brauchen die Historie für diesen User in dieser Abteilung
+    // URL anpassen je nach deinem Backend
+    const response = await axios.get(`${API_HISTORY}`, {
+      params: {
+        user_id: user.id,
+        abteilung_id: selectedDepartment.value
+      }
+    })
+    user.history = response.data
+  } catch (e) {
+    console.error("Fehler beim Laden der Historie", e)
+  } finally {
+    user.isLoadingHistory = false
+  }
+}
+
 // --- Edit Dialog ---
 function openEditDialog(user: UserWithRate) {
   selectedUser.value = user
-  newRate.value = user.aktuellerSatz || '' // Vorbelegen oder leer
+  newRate.value = user.aktuellerSatz || ''
 
-  // Standard-Datum: Morgen
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
   validFrom.value = tomorrow.toISOString().split('T')[0]
@@ -116,7 +156,7 @@ async function saveRate() {
 
   const payload = {
     user_id: selectedUser.value.id,
-    abteilung_id: selectedDepartment.value, // Optional, falls Stundensätze pro Abteilung variieren
+    abteilung_id: selectedDepartment.value,
     satz: parseFloat(newRate.value.toString()),
     gueltig_ab: validFrom.value
   }
@@ -124,11 +164,10 @@ async function saveRate() {
   try {
     await axios.post(API_UPDATE_RATE, payload)
 
-    successMessage.value = `Stundensatz für ${selectedUser.value.vorname} ${selectedUser.value.name} aktualisiert.`
+    successMessage.value = `Stundensatz aktualisiert.`
     setTimeout(() => successMessage.value = null, 3000)
 
     closeDialog()
-    // Liste neu laden, um Änderungen zu sehen
     await loadUsers(selectedDepartment.value)
 
   } catch (error: any) {
@@ -190,16 +229,29 @@ function goBack() {
         <v-alert v-if="successMessage" type="success" variant="tonal" class="mb-4" closable>{{ successMessage }}</v-alert>
 
         <v-data-table
+            v-model:expanded="expanded"
             :headers="[
-            { title: 'Name', key: 'name' },
-            { title: 'Aktueller Satz', key: 'aktuellerSatz', align: 'end' },
-            { title: 'Gültig seit', key: 'gueltigSeit', align: 'end' },
-            { title: 'Aktion', key: 'actions', align: 'end', sortable: false }
-          ]"
+              { title: 'Name', key: 'name' },
+              { title: 'Aktueller Satz', key: 'aktuellerSatz', align: 'end' },
+              { title: 'Gültig seit', key: 'gueltigSeit', align: 'end' },
+              { title: 'Aktion', key: 'actions', align: 'end', sortable: false },
+              // Leer-Header für den Pfeil wird automatisch generiert durch show-expand
+            ]"
             :items="users"
             :loading="isLoading"
+            item-value="id"
+            show-expand
             hover
             density="comfortable"
+            @update:expanded="(newVal) => {
+              // Wenn eine Zeile aufgeklappt wird, laden wir Daten nach
+              if (newVal.length > 0) {
+                 // Die ID des zuletzt aufgeklappten Items finden
+                 const lastId = newVal[newVal.length - 1];
+                 const item = users.find(u => u.id === lastId);
+                 if(item) loadHistoryForUser(item);
+              }
+            }"
         >
           <template v-slot:item.name="{ item }">
             <div class="font-weight-medium">{{ item.name }}, {{ item.vorname }}</div>
@@ -221,9 +273,53 @@ function goBack() {
                 color="primary"
                 variant="text"
                 icon="mdi-pencil"
-                @click="openEditDialog(item)"
+                @click.stop="openEditDialog(item)"
                 title="Satz ändern"
             ></v-btn>
+          </template>
+
+          <template v-slot:expanded-row="{ columns, item }">
+            <tr>
+              <td :colspan="columns.length" class="bg-grey-lighten-5 pa-4">
+                <div class="text-subtitle-2 mb-2 text-medium-emphasis">Historie der Stundensätze</div>
+
+                <div v-if="item.isLoadingHistory" class="d-flex align-center py-2">
+                  <v-progress-circular indeterminate size="20" width="2" color="primary" class="mr-2"></v-progress-circular>
+                  <span class="text-caption">Lade Historie...</span>
+                </div>
+
+                <div v-else-if="!item.history || item.history.length === 0" class="text-caption font-italic text-medium-emphasis">
+                  Keine historischen Einträge gefunden.
+                </div>
+
+                <v-table v-else density="compact" class="bg-transparent" style="max-width: 600px;">
+                  <thead>
+                  <tr>
+                    <th class="text-left">Zeitraum</th>
+                    <th class="text-right">Satz</th>
+                    <th class="text-left pl-4">Status</th>
+                  </tr>
+                  </thead>
+                  <tbody>
+                  <tr v-for="(hist, i) in item.history" :key="i">
+                    <td>
+                      {{ formatDate(hist.gueltigVon) }}
+                      -
+                      {{ hist.gueltigBis ? formatDate(hist.gueltigBis) : 'heute' }}
+                    </td>
+                    <td class="text-right font-weight-bold">
+                      {{ formatCurrency(hist.satz) }}
+                    </td>
+                    <td class="pl-4">
+                      <v-chip size="x-small" :color="hist.gueltigBis ? 'grey' : 'green'" variant="tonal">
+                        {{ hist.gueltigBis ? 'Archiviert' : 'Aktiv' }}
+                      </v-chip>
+                    </td>
+                  </tr>
+                  </tbody>
+                </v-table>
+              </td>
+            </tr>
           </template>
 
           <template v-slot:no-data>

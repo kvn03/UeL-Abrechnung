@@ -276,4 +276,38 @@ class AbrechnungController extends Controller
             'eintraege' => $eintraegeFormatted
         ]);
     }
+    /**
+     * Gibt alle Stundensätze des eingeloggten Übungsleiters zurück.
+     * GET /api/uebungsleiter/meine-saetze
+     */
+    public function getMeineSaetze(Request $request)
+    {
+        $userId = Auth::id();
+
+        // Alle Sätze holen inkl. Abteilungsname
+        $saetze = DB::table('stundensatz')
+            ->join('abteilung_definition', 'stundensatz.fk_abteilungID', '=', 'abteilung_definition.AbteilungID')
+            ->where('fk_userID', $userId)
+            ->orderBy('abteilung_definition.name') // Erst nach Abteilung sortieren
+            ->orderBy('gueltigVon', 'desc')        // Dann nach Datum (neueste zuerst)
+            ->select(
+                'stundensatz.satz',
+                'stundensatz.gueltigVon',
+                'stundensatz.gueltigBis',
+                'abteilung_definition.name as abteilung',
+                'abteilung_definition.AbteilungID as abteilung_id'
+            )
+            ->get();
+
+        // Wir gruppieren die Daten direkt hier oder im Frontend.
+        // Für eine einfache API geben wir die Liste zurück, das Frontend gruppiert.
+
+        // Casten
+        $saetze = $saetze->map(function($s) {
+            $s->satz = (float)$s->satz;
+            return $s;
+        });
+
+        return response()->json($saetze);
+    }
 }

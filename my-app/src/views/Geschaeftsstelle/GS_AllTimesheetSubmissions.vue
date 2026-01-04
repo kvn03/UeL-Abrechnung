@@ -376,7 +376,7 @@ onMounted(() => {
               <v-text-field v-model="formData.beginn" label="Beginn" type="time" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
               <v-text-field v-model="formData.ende" label="Ende" type="time" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
             </div>
-            <v-text-field v-model="formData.kurs" label="Kurs / Tätigkeit" variant="outlined" density="comfortable" class="mb-3"></v-text-field>
+            <v-text-field v-model="formData.kurs" label="Kurs / Tätigkeit" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
           </v-form>
         </v-card-text>
         <v-card-actions>

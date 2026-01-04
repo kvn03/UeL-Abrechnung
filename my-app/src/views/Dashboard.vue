@@ -167,6 +167,15 @@
                     >
                       Lizenz angeben
                     </v-btn>
+                    <v-btn
+                        class="w-100"
+                        color="primary"
+                        variant="tonal"
+                        prepend-icon="mdi-cash-clock"
+                        @click="router.push({ name: 'MyRates' })"
+                    >
+                      Meine Stundensätze
+                    </v-btn>
                   </template>
 
 
@@ -189,6 +198,15 @@
                         @click="router.push({ name: 'ManageRates' })"
                     >
                       Stundensätze verwalten
+                    </v-btn>
+                    <v-btn
+                        color="blue-grey"
+                        variant="tonal"
+                        prepend-icon="mdi-archive"
+                        class="w-100 mb-2"
+                        @click="router.push({ name: 'ALTimesheetHistory' })"
+                    >
+                      Abrechnungshistorie
                     </v-btn>
 
                     <div></div>

@@ -113,14 +113,16 @@ class GeschaeftsstelleController extends Controller
     }
 
     /**
-     * [GET] Geschäftsstelle: Historische Abrechnungen
+     * [GET] Geschäftsstelle: Historie / Archiv
+     * Zeigt ALLE Abrechnungen eines Quartals an (egal welcher Status).
+     * Inklusive Berechnung der damaligen Kosten.
      */
     public function getAbrechnungenHistorieFuerGeschaeftsstelle(Request $request)
     {
         $year = (int) $request->query('year', Carbon::now()->year);
         $quarter = $request->query('quarter');
 
-        // Zeitraum je nach Quartal bestimmen
+        // 1. Zeitraum bestimmen
         if ($quarter === 'Q1') {
             $start = Carbon::create($year, 1, 1)->startOfDay();
             $end   = Carbon::create($year, 3, 31)->endOfDay();
@@ -134,48 +136,143 @@ class GeschaeftsstelleController extends Controller
             $start = Carbon::create($year, 10, 1)->startOfDay();
             $end   = Carbon::create($year, 12, 31)->endOfDay();
         } else {
+            // Fallback: Ganzes Jahr
             $start = Carbon::create($year, 1, 1)->startOfDay();
             $end   = Carbon::create($year, 12, 31)->endOfDay();
         }
 
-        // Abrechnungen über das verknüpfte Quartal filtern (beginn/ende)
+        // 2. Daten laden (Kein Status-Filter! Wir wollen alles sehen)
         $abrechnungen = Abrechnung::with([
-                'creator',
-                'abteilung',
-                'stundeneintraege',
-                'quartal',
-                'statusLogs' => function ($q) { $q->orderBy('modifiedAt', 'desc'); },
-                'statusLogs.statusDefinition',
-            ])
+            'creator',
+            'abteilung',
+            'stundeneintraege',
+            'quartal',
+            // Wir laden die Status-Definition, um den Namen (z.B. "Bezahlt") zu haben
+            'statusLogs.statusDefinition',
+            'statusLogs.modifier'
+        ])
             ->whereHas('quartal', function ($q) use ($start, $end) {
                 $q->whereBetween('beginn', [$start, $end])
-                  ->orWhereBetween('ende', [$start, $end]);
+                    ->orWhereBetween('ende', [$start, $end]);
             })
-            ->orderBy('AbrechnungID', 'asc')
+            ->orderBy('AbrechnungID', 'desc') // Neueste zuerst
             ->get();
 
+        // 3. Mapping & Preisberechnung
         $result = $abrechnungen->map(function ($a) {
-            $latestLog = $a->statusLogs->first();
-            $statusName = $latestLog && $latestLog->statusDefinition
-                ? $latestLog->statusDefinition->name
-                : 'Unbekannt';
 
-            $zeitraumText = 'Unbekannt';
-            if ($a->quartal) {
-                $zeitraumText = $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y');
-            }
+            // Aktueller Status
+            $latestLog = $a->statusLogs->sortByDesc('modifiedAt')->first();
+            $statusName = $latestLog && $latestLog->statusDefinition ? $latestLog->statusDefinition->name : 'Unbekannt';
+            $statusId = $latestLog ? $latestLog->fk_statusID : 0;
+
+            // Stundensätze laden für Historisierung
+            $rates = DB::table('stundensatz')
+                ->where('fk_userID', $a->createdBy)
+                ->where('fk_abteilungID', $a->fk_abteilung)
+                ->get();
+
+            // Details berechnen
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+                $eintragDatum = Carbon::parse($e->datum)->startOfDay();
+                $validRate = $rates->first(function($rate) use ($eintragDatum) {
+                    $start = Carbon::parse($rate->gueltigVon)->startOfDay();
+                    $end   = $rate->gueltigBis ? Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+                    return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
+                });
+                $satz = $validRate ? (float)$validRate->satz : 0;
+                $betrag = round($e->dauer * $satz, 2);
+
+                return [
+                    'datum'  => $e->datum,
+                    'dauer'  => $e->dauer,
+                    'kurs'   => $e->kurs,
+                    'betrag' => $betrag
+                ];
+            });
+
+            $zeitraumText = $a->quartal
+                ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
+                : '-';
 
             return [
                 'AbrechnungID'    => $a->AbrechnungID,
                 'mitarbeiterName' => $a->creator->vorname . ' ' . $a->creator->name,
                 'abteilung'       => $a->abteilung->name ?? 'Unbekannt',
                 'stunden'         => round($a->stundeneintraege->sum('dauer'), 2),
+                'gesamtBetrag'    => $mappedDetails->sum('betrag'), // Summe
                 'zeitraum'        => $zeitraumText,
+                'quartal'         => $a->quartal ? $a->quartal->bezeichnung : '',
                 'status'          => $statusName,
+                'status_id'       => $statusId,
+                'details'         => $mappedDetails, // Für den Detail-Dialog
+
+                // Historie für den Dialog
+                'history' => $a->statusLogs->sortByDesc('modifiedAt')->map(function($log) {
+                    return [
+                        'date' => Carbon::parse($log->modifiedAt)->format('d.m.Y H:i'),
+                        'status' => $log->statusDefinition->name ?? 'Status',
+                        'user' => $log->modifier ? ($log->modifier->vorname.' '.$log->modifier->name) : 'System',
+                        'kommentar' => $log->kommentar
+                    ];
+                })->values()
             ];
         })->values();
 
         return response()->json($result);
+    }
+    /**
+     * [POST] Geschäftsstelle: Finale Freigabe (Auszahlung)
+     */
+    public function finalize(Request $request, $id)
+    {
+        $userId = Auth::id();
+        $abrechnung = Abrechnung::findOrFail($id);
+
+        // 1. Den aktuellsten Status-Log-Eintrag finden
+        $currentLog = $abrechnung->statusLogs()
+            ->orderBy('modifiedAt', 'desc')
+            ->first();
+
+        // Fallback, falls gar kein Status existiert (sollte nicht passieren)
+        $currentStatus = $currentLog ? $currentLog->fk_statusID : 0;
+
+        $newStatus = null;
+        $kommentar = '';
+
+        // 2. Logik: Welcher Schritt ist dran?
+        if ($currentStatus == 21) {
+            // Szenario: AL hat genehmigt -> GS gibt zur Zahlung frei
+            $newStatus = 22;
+            $kommentar = 'Finale Freigabe durch Geschäftsstelle (Wartet auf Zahlung)';
+        } elseif ($currentStatus == 22) {
+            // Szenario: Wartet auf Zahlung -> GS markiert als bezahlt
+            $newStatus = 23;
+            $kommentar = 'Auszahlung getätigt / Vorgang abgeschlossen';
+        } else {
+            // Fehlerfall: Status passt nicht in den Workflow
+            return response()->json([
+                'message' => 'Status kann nicht fortgesetzt werden. Aktueller Status: ' . $currentStatus
+            ], 400);
+        }
+
+        // 3. Neuen Status schreiben
+        try {
+            DB::transaction(function () use ($abrechnung, $newStatus, $userId, $kommentar) {
+                \App\Models\AbrechnungStatusLog::create([
+                    'fk_abrechnungID' => $abrechnung->AbrechnungID,
+                    'fk_statusID'     => $newStatus,
+                    'modifiedBy'      => $userId,
+                    'modifiedAt'      => now(),
+                    'kommentar'       => $kommentar
+                ]);
+            });
+
+            return response()->json(['message' => 'Status erfolgreich auf ' . $newStatus . ' aktualisiert.']);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Datenbankfehler beim Speichern.', 'error' => $e->getMessage()], 500);
+        }
     }
 
     /**
@@ -187,7 +284,7 @@ class GeschaeftsstelleController extends Controller
             'datum'           => 'required|date',
             'beginn'          => 'required|date_format:H:i',
             'ende'            => 'required|date_format:H:i|after:beginn',
-            'kurs'            => 'nullable|string',
+            'kurs'            => 'required|string',
             'fk_abteilung'    => 'nullable|exists:abteilung_definition,AbteilungID',
             'fk_abrechnungID' => 'required|exists:abrechnung,AbrechnungID',
             'status_id'       => 'required|integer',
@@ -473,6 +570,126 @@ class GeschaeftsstelleController extends Controller
                 'gueltigSeit' => $currentRate ? $currentRate->gueltigVon : null,
             ];
         });
+
+        return response()->json($result);
+    }
+    /**
+     * Lädt die Historie für die GS (User + Abteilung).
+     * GET /api/geschaeftsstelle/stundensatz-historie?user_id=X&abteilung_id=Y
+     */
+    public function getStundensatzHistorie(Request $request)
+    {
+        $validated = $request->validate([
+            'user_id'      => 'required|integer|exists:user,UserID',
+            'abteilung_id' => 'required|integer|exists:abteilung_definition,AbteilungID',
+        ]);
+
+        $history = DB::table('stundensatz')
+            ->where('fk_userID', $validated['user_id'])
+            ->where('fk_abteilungID', $validated['abteilung_id'])
+            ->orderBy('gueltigVon', 'desc')
+            ->select('satz', 'gueltigVon', 'gueltigBis')
+            ->get();
+
+        // Casten auf Float für sauberes JSON
+        $history = $history->map(function($entry) {
+            $entry->satz = (float) $entry->satz;
+            return $entry;
+        });
+
+        return response()->json($history);
+    }
+    /**
+     * [GET] Liefert alle Abrechnungen, die bereit zur Auszahlung sind (Status 22).
+     */
+    public function getAuszahlungen(Request $request)
+    {
+        $statusReadyForPayment = 22;
+
+        $abrechnungen = \App\Models\Abrechnung::with([
+            'creator',
+            'abteilung',
+            'stundeneintraege',
+            'quartal',
+            'statusLogs' => function($q) { $q->orderBy('modifiedAt', 'desc'); },
+            'statusLogs.modifier'
+        ])->get();
+
+        // Filtern auf Status 22
+        $filterteAbrechnungen = $abrechnungen->filter(function($a) use ($statusReadyForPayment) {
+            $neuestesLog = $a->statusLogs->first();
+            return $neuestesLog && $neuestesLog->fk_statusID == $statusReadyForPayment;
+        });
+
+        $result = $filterteAbrechnungen->map(function($a) {
+
+            // 1. Genehmigung AL (Status 21)
+            $logAL = $a->statusLogs->firstWhere('fk_statusID', 21);
+            $alName = ($logAL && $logAL->modifier)
+                ? $logAL->modifier->vorname . ' ' . $logAL->modifier->name
+                : '-';
+            $alDatum = $logAL ? \Carbon\Carbon::parse($logAL->modifiedAt)->format('d.m.Y') : '-';
+
+            // 2. Freigabe GS (Status 22)
+            $logGS = $a->statusLogs->firstWhere('fk_statusID', 22);
+            $gsName = ($logGS && $logGS->modifier)
+                ? $logGS->modifier->vorname . ' ' . $logGS->modifier->name
+                : 'Geschäftsstelle';
+            $gsDatum = $logGS ? \Carbon\Carbon::parse($logGS->modifiedAt)->format('d.m.Y') : '-';
+
+            // Stundensätze & Beträge berechnen
+            $rates = DB::table('stundensatz')
+                ->where('fk_userID', $a->createdBy)
+                ->where('fk_abteilungID', $a->fk_abteilung)
+                ->get();
+
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+                $eintragDatum = \Carbon\Carbon::parse($e->datum)->startOfDay();
+                $validRate = $rates->first(function($rate) use ($eintragDatum) {
+                    $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
+                    $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
+                    return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
+                });
+                $satz = $validRate ? (float)$validRate->satz : 0;
+                $betrag = round($e->dauer * $satz, 2);
+
+                return [
+                    'datum'  => $e->datum,
+                    'beginn' => $e->beginn,
+                    'ende'   => $e->ende,
+                    'dauer'  => $e->dauer,
+                    'kurs'   => $e->kurs,
+                    'betrag' => $betrag
+                ];
+            });
+
+            // IBAN aus Stammdaten
+            $stammdaten = DB::table('user_stammdaten')
+                ->where('fk_userID', $a->creator->UserID)
+                ->whereNull('gueltigBis')
+                ->orderBy('gueltigVon', 'desc')
+                ->first();
+            $iban = $stammdaten ? $stammdaten->iban : null;
+
+            return [
+                'AbrechnungID'     => $a->AbrechnungID,
+                'mitarbeiterName'  => $a->creator->vorname . ' ' . $a->creator->name,
+                'abteilung'        => $a->abteilung->name ?? 'Unbekannt',
+                'stunden'          => round($a->stundeneintraege->sum('dauer'), 2),
+                'gesamtBetrag'     => $mappedDetails->sum('betrag'),
+                'iban'             => $iban,
+                'zeitraum'         => $a->quartal ? $a->quartal->bezeichnung : '-',
+
+                // --- NEUE FELDER ---
+                'datumGenehmigtAL' => $alDatum,
+                'genehmigtDurchAL' => $alName,
+                'datumFreigabeGS'  => $gsDatum,
+                'freigabeDurchGS'  => $gsName,
+                // -------------------
+
+                'details'          => $mappedDetails
+            ];
+        })->values();
 
         return response()->json($result);
     }

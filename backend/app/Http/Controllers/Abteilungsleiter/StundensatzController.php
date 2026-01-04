@@ -118,4 +118,37 @@ class StundensatzController extends Controller
             return response()->json(['message' => 'Fehler: ' . $e->getMessage()], 500);
         }
     }
+    /**
+     * Lädt die Historie aller Stundensätze für einen Mitarbeiter in einer Abteilung.
+     * GET /api/abteilungsleiter/stundensatz-historie?user_id=X&abteilung_id=Y
+     */
+    public function getStundensatzHistorie(Request $request)
+    {
+        // 1. Validierung der Parameter
+        $validated = $request->validate([
+            'user_id'      => 'required|integer|exists:user,UserID',
+            'abteilung_id' => 'required|integer|exists:abteilung_definition,AbteilungID',
+        ]);
+
+        $userId = $validated['user_id'];
+        $abteilungId = $validated['abteilung_id'];
+
+        // 2. Historie laden
+        $history = DB::table('stundensatz')
+            ->where('fk_userID', $userId)
+            ->where('fk_abteilungID', $abteilungId)
+            // Wichtig: Neueste zuerst (damit der aktuelle oben steht)
+            ->orderBy('gueltigVon', 'desc')
+            ->select('satz', 'gueltigVon', 'gueltigBis')
+            ->get();
+
+        // 3. Typkonvertierung (optional, aber sauberer für JS)
+        // Laravel gibt Decimal oft als String zurück, wir casten zu Float
+        $history = $history->map(function($entry) {
+            $entry->satz = (float) $entry->satz;
+            return $entry;
+        });
+
+        return response()->json($history);
+    }
 }

@@ -22,7 +22,7 @@ function goBack() {
 const API_BASE = 'http://127.0.0.1:8000/api'
 const API_URL = `${API_BASE}/abteilungsleiter/abrechnungen`
 
-// --- TYPES (ANGEPASST) ---
+// --- TYPES ---
 interface TimesheetEntry {
   EintragID: number
   datum: string
@@ -30,7 +30,7 @@ interface TimesheetEntry {
   ende: string
   dauer: number
   kurs: string
-  betrag: number | null // <--- NEU: Der Betrag für diesen einzelnen Eintrag
+  betrag: number | null
   fk_abrechnungID?: number
 }
 
@@ -40,13 +40,12 @@ interface Submission {
   quartal: string
   zeitraum: string
   stunden: number
-  gesamtBetrag: number // <--- NEU: Summe in Euro
+  gesamtBetrag: number
   datumEingereicht: string
   details: TimesheetEntry[]
 }
 
 // --- STATE ---
-// ... (Bleibt gleich)
 const isLoading = ref<boolean>(false)
 const errorMessage = ref<string | null>(null)
 const submissions = ref<Submission[]>([])
@@ -84,14 +83,12 @@ async function fetchReleaseSubmissions() {
   try {
     const response = await axios.get<Submission[]>(API_URL)
     submissions.value = response.data
-
-    // Fallback: Falls das Backend "gesamtBetrag" noch nicht liefert, berechnen wir es hier im Frontend
+    // Fallback Berechnung
     submissions.value.forEach(sub => {
       if (sub.gesamtBetrag === undefined || sub.gesamtBetrag === null) {
         sub.gesamtBetrag = sub.details.reduce((sum, entry) => sum + (Number(entry.betrag) || 0), 0)
       }
     })
-
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.message || 'Fehler beim Laden.'
   } finally {
@@ -103,7 +100,6 @@ async function fetchReleaseSubmissions() {
 async function approveSubmission(id: number) {
   if (!confirm("Möchtest du diese Abrechnung wirklich genehmigen?")) return
   isProcessingId.value = id
-
   try {
     await axios.post(`${API_URL}/${id}/approve`)
     submissions.value = submissions.value.filter(item => item.AbrechnungID !== id)
@@ -127,9 +123,7 @@ async function submitRejection() {
     alert("Bitte gib eine Begründung an (mind. 5 Zeichen).")
     return
   }
-
   rejectLoading.value = true
-
   try {
     await axios.post(`${API_URL}/${idToReject.value}/reject`, {
       grund: rejectReason.value
@@ -144,35 +138,48 @@ async function submitRejection() {
   }
 }
 
-// --- HELPER: Summe neu berechnen (Updates für Betrag) ---
+// --- HELPER & ACTIONS ---
 function recalculateTotal(submissionId: number) {
   const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
   if (subIndex === -1) return
-
   const sub = submissions.value[subIndex]
-
-  // Stunden summieren
   const totalHours = sub.details.reduce((sum, entry) => sum + Number(entry.dauer), 0)
   sub.stunden = parseFloat(totalHours.toFixed(2))
-
-  // Betrag summieren
   const totalMoney = sub.details.reduce((sum, entry) => sum + (Number(entry.betrag) || 0), 0)
   sub.gesamtBetrag = parseFloat(totalMoney.toFixed(2))
 }
 
-// --- HELPER: Währung formatieren ---
 function formatCurrency(val: number | null | undefined) {
   if (val === null || val === undefined) return '-'
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(val)
 }
 
-// --- AKTION: LÖSCHEN ---
+function formatNumber(val: number) {
+  return val.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
+}
+
+// --- WICHTIG: DATUM FORMATIEREN ---
+function formatDate(dateStr: string) {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  })
+}
+
+// --- WICHTIG: ZEIT FORMATIEREN (Sekunden abschneiden) ---
+function formatTime(timeStr: string) {
+  if (!timeStr) return ''
+  // Schneidet "14:30:00" nach "14:30" ab
+  return timeStr.substring(0, 5)
+}
+
 async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
   if (!confirm(`Eintrag vom ${entry.datum} wirklich löschen?`)) return
-
   try {
     await axios.delete(`${API_BASE}/abteilungsleiter/stundeneintrag/${entry.EintragID}`)
-
     const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
     if (subIndex !== -1) {
       submissions.value[subIndex].details = submissions.value[subIndex].details.filter(e => e.EintragID !== entry.EintragID)
@@ -183,31 +190,25 @@ async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
   }
 }
 
-// --- AKTION: ÖFFNEN / SPEICHERN (Bleibt größtenteils gleich) ---
-function openAddDialog(submissionId: number) {
-  isEditMode.value = false
-  currentSubmissionId.value = submissionId
-  currentEntryId.value = null
-  formData.value = { datum: new Date().toISOString().split('T')[0], beginn: '', ende: '', kurs: '' }
-  showDialog.value = true
-}
+function openAddDialog(submissionId: number) { isEditMode.value = false; currentSubmissionId.value = submissionId; currentEntryId.value = null; formData.value = { datum: new Date().toISOString().split('T')[0], beginn: '', ende: '', kurs: '' }; showDialog.value = true }
 
 function openEditDialog(entry: TimesheetEntry, submissionId: number) {
-  isEditMode.value = true
-  currentSubmissionId.value = submissionId
+  isEditMode.value = true;
+  currentSubmissionId.value = submissionId;
   const id = entry.EintragID || (entry as any).id;
   currentEntryId.value = id;
-
   if (!id) { alert("Fehler: Keine ID gefunden."); return; }
 
+  // Datum/Zeit für das Formular (input type="date/time") muss ISO bleiben
   const rawDate = entry.datum || '';
-  const formattedDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
-  const formatTime = (t: string) => (t && t.length >= 5) ? t.substring(0, 5) : '';
+  const isoDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
+  const isoTimeBegin = (entry.beginn && entry.beginn.length >= 5) ? entry.beginn.substring(0, 5) : '';
+  const isoTimeEnd = (entry.ende && entry.ende.length >= 5) ? entry.ende.substring(0, 5) : '';
 
   formData.value = {
-    datum: formattedDate,
-    beginn: formatTime(entry.beginn),
-    ende: formatTime(entry.ende),
+    datum: isoDate,
+    beginn: isoTimeBegin,
+    ende: isoTimeEnd,
     kurs: entry.kurs || ''
   }
   originalData.value = JSON.parse(JSON.stringify(formData.value))
@@ -218,10 +219,8 @@ async function saveEntry() {
   const { valid } = await dialogForm.value?.validate() || { valid: false }
   if (!valid) return
   dialogLoading.value = true
-
   try {
     const payload = { ...formData.value, fk_abrechnungID: currentSubmissionId.value, status_id: 11 }
-
     if (isEditMode.value) {
       if (!currentEntryId.value) throw new Error("ID fehlt.");
       await axios.put(`${API_BASE}/abteilungsleiter/stundeneintrag/${currentEntryId.value}`, payload)
@@ -230,7 +229,6 @@ async function saveEntry() {
       await axios.post(`${API_BASE}/abteilungsleiter/stundeneintrag`, payload)
       alert("Eintrag hinzugefügt")
     }
-    // Wichtig: Neu laden, damit das Backend den Betrag für den neuen/geänderten Eintrag berechnet!
     await fetchReleaseSubmissions()
     showDialog.value = false
   } catch (error: any) {
@@ -242,11 +240,8 @@ async function saveEntry() {
 }
 
 function toggleDetails(id: number) {
-  if (expandedIds.value.includes(id)) {
-    expandedIds.value = expandedIds.value.filter(x => x !== id)
-  } else {
-    expandedIds.value.push(id)
-  }
+  if (expandedIds.value.includes(id)) expandedIds.value = expandedIds.value.filter(x => x !== id)
+  else expandedIds.value.push(id)
 }
 const requiredRule = [(v: any) => !!v || 'Pflichtfeld']
 
@@ -271,7 +266,7 @@ onMounted(() => {
         </v-btn>
       </v-card-title>
 
-      <div class="text-body-2 text-medium-emphasis mb-4" style="max-width: 90%;">
+      <div class="text-body-2 text-medium-emphasis mb-4">
         In diesem Bereich gibst du als Abteilungsleiter die Abrechnungen für deine Abteilung frei.
       </div>
 
@@ -281,9 +276,7 @@ onMounted(() => {
           Daten werden geladen ...
         </div>
 
-        <v-alert v-else-if="errorMessage" type="error" variant="tonal" class="mb-4">
-          {{ errorMessage }}
-        </v-alert>
+        <v-alert v-else-if="errorMessage" type="error" variant="tonal" class="mb-4">{{ errorMessage }}</v-alert>
 
         <div v-else-if="submissions.length > 0" class="list">
           <div v-for="item in submissions" :key="item.AbrechnungID" class="submission-wrapper">
@@ -303,7 +296,7 @@ onMounted(() => {
                 <div class="line">
                   <span class="label">Gesamt:</span>
                   <span class="value font-weight-bold">
-                    {{ item.stunden.toLocaleString('de-DE') }} Std.
+                    {{ formatNumber(item.stunden) }} Std.
                   </span>
                   <span class="mx-2 text-medium-emphasis">|</span>
                   <span class="value font-weight-bold text-success">
@@ -334,10 +327,12 @@ onMounted(() => {
                   </thead>
                   <tbody>
                   <tr v-for="(detail) in item.details" :key="detail.EintragID">
-                    <td>{{ detail.datum }}</td>
-                    <td>{{ detail.beginn }} - {{ detail.ende }}</td>
+                    <td>{{ formatDate(detail.datum) }}</td>
+
+                    <td>{{ formatTime(detail.beginn) }} - {{ formatTime(detail.ende) }}</td>
+
                     <td>{{ detail.kurs }}</td>
-                    <td class="text-right">{{ detail.dauer }} Std.</td>
+                    <td class="text-right">{{ formatNumber(detail.dauer) }} Std.</td>
                     <td class="text-right font-weight-medium">{{ formatCurrency(detail.betrag) }}</td>
                     <td class="text-right">
                       <v-btn icon="mdi-pencil" size="x-small" variant="text" color="blue" class="mr-1" @click="openEditDialog(detail, item.AbrechnungID)"></v-btn>
@@ -363,9 +358,7 @@ onMounted(() => {
 
     <v-dialog v-model="showDialog" max-width="500px">
       <v-card>
-        <v-card-title>
-          {{ isEditMode ? 'Eintrag bearbeiten' : 'Neuen Eintrag hinzufügen' }}
-        </v-card-title>
+        <v-card-title>{{ isEditMode ? 'Eintrag bearbeiten' : 'Neuen Eintrag hinzufügen' }}</v-card-title>
         <v-card-text>
           <v-form ref="dialogForm" @submit.prevent="saveEntry">
             <v-text-field v-model="formData.datum" label="Datum" type="date" variant="outlined" density="comfortable" :rules="requiredRule" class="mb-3"></v-text-field>
@@ -403,7 +396,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* CSS bleibt gleich wie im vorherigen Beispiel */
 .page { padding: 24px; max-width: 800px; margin: 0 auto; }
 .placeholder { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(0, 0, 0, 0.6); font-size: 1rem; border-radius: 8px; background: rgba(0,0,0,0.02); margin-top: 8px; padding: 16px; text-align: center; }
 .list { margin-top: 8px; display: flex; flex-direction: column; gap: 12px; }
