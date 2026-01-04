@@ -37,7 +37,7 @@ const originalData = ref<{
 // 1. Abteilungen laden
 async function fetchUserDepartments() {
   try {
-    const response = await axios.get('http://127.0.0.1:8000/api/meine-uel-abteilungen')
+    const response = await axios.get(import.meta.env.VITE_API_URL + '/api/meine-uel-abteilungen')
     departments.value = response.data
   } catch (error: any) {
     if (error.response?.status === 401) router.push({ name: 'Login' })
@@ -138,10 +138,10 @@ async function onSubmit() {
 
   try {
     if (isEditMode.value) {
-      await axios.put(`http://127.0.0.1:8000/api/stundeneintrag/${entryId.value}`, payload)
+      await axios.put(import.meta.env.VITE_API_URL + '/api/stundeneintrag/${entryId.value}', payload)
       alert("Eintrag aktualisiert!")
     } else {
-      await axios.post('http://127.0.0.1:8000/api/stundeneintrag', payload)
+      await axios.post(import.meta.env.VITE_API_URL + '/api/stundeneintrag', payload)
       alert("Eintrag erfolgreich erstellt!")
     }
     goBack()

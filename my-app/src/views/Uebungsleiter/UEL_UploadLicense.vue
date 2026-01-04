@@ -84,8 +84,7 @@ const lizenzName = ref('')
 const gueltigVon = ref('')
 const gueltigBis = ref('')
 
-// Platzhalter: Hier später den echten Backend-Endpoint eintragen
-const API_URL_PLACEHOLDER = 'http://127.0.0.1:8000/api/uebungsleiter/lizenz'
+const API_URL_PLACEHOLDER = import.meta.env.VITE_API_URL + '/api/uebungsleiter/lizenz'
 
 // Optional: Loading/Error State für UX
 const isSaving = ref(false)

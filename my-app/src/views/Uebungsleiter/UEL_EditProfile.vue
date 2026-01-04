@@ -139,7 +139,7 @@ const isSaving = ref(false)
 const errorMessage = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 
-const API_URL = 'http://127.0.0.1:8000/api/uebungsleiter/profil'
+const API_URL = import.meta.env.VITE_API_URL + '/api/uebungsleiter/profil'
 
 // --- IBAN Validierungs-Logik (Modulo 97 Algorithmus) ---
 function checkIBAN(input: string): boolean | string {

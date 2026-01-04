@@ -9,7 +9,7 @@ function goBack() {
   router.push({ name: 'Dashboard' })
 }
 
-const API_URL = 'http://127.0.0.1:8000/api/abrechnung/meine'
+const API_URL = import.meta.env.VITE_API_URL + '/api/abrechnung/meine'
 
 // --- INTERFACES ---
 

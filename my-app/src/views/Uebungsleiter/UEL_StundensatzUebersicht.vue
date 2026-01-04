@@ -26,7 +26,7 @@ const isLoading = ref(false)
 const rawRates = ref<RateEntry[]>([])
 const errorMessage = ref<string | null>(null)
 
-const API_URL = 'http://127.0.0.1:8000/api/uebungsleiter/meine-saetze'
+const API_URL = import.meta.env.VITE_API_URL + '/api/uebungsleiter/meine-saetze'
 
 // --- Computed: Gruppierung nach Abteilung ---
 const groupedRates = computed(() => {

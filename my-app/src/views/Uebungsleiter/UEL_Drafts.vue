@@ -77,7 +77,7 @@ async function submitSelection() {
 
   try {
     // Hier rufen wir den Controller auf, den wir vorhin erstellt haben
-    await axios.post('http://127.0.0.1:8000/api/abrechnung/erstellen', {
+    await axios.post(import.meta.env.VITE_API_URL + '/api/abrechnung/erstellen', {
       stundeneintrag_ids: selectedIds.value
     })
 
