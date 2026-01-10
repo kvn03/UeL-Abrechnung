@@ -16,7 +16,7 @@ return new class extends Migration
 
             // Optional: Standard Laravel Timestamps (created_at, updated_at)
             // Falls du die nicht willst, lass die Zeile weg.
-            $table->timestamps();
+            //$table->timestamps();
         });
     }
 
