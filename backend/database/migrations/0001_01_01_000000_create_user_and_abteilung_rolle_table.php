@@ -60,7 +60,7 @@ return new class extends Migration
         Schema::create('abteilung_definition', function (Blueprint $table) {
             $table->id('AbteilungID');
             $table->string('name');
-            $table->timestamps();
+            //$table->timestamps();
         });
 
 
@@ -68,7 +68,7 @@ return new class extends Migration
         Schema::create('rolle_definition', function (Blueprint $table) {
             $table->id('RolleID');
             $table->string('bezeichnung');
-            $table->timestamps();
+            //$table->timestamps();
         });
 
 
