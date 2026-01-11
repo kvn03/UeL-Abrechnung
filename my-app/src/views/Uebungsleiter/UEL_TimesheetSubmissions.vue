@@ -17,8 +17,9 @@ interface Submission {
   id: number
   zeitraum: string
   quartal_name: string
+  abteilung: string // <--- NEU: Abteilungsname
   stunden: number
-  gesamtBetrag: number // <--- NEU: Summe der Abrechnung
+  gesamtBetrag: number
   status: string
   status_id: number
   datum_erstellt: string
@@ -45,7 +46,7 @@ interface DetailEntry {
   ende: string
   dauer: number
   kurs: string
-  betrag: number | null // <--- NEU: Betrag pro Eintrag
+  betrag: number | null
   history: HistoryEntry[]
 }
 
@@ -136,7 +137,6 @@ function formatDateDisplay(dateString: string) {
   })
 }
 
-// NEU: Währung formatieren
 function formatCurrency(val: number | null | undefined) {
   if (val === null || val === undefined) return '-'
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(val)
@@ -210,7 +210,7 @@ onMounted(() => {
             <tr>
               <th class="text-left" style="width: 80px;">ID</th>
               <th class="text-left">Quartal</th>
-              <th class="text-left">Zeitraum</th>
+              <th class="text-left">Abteilung</th>
               <th class="text-left">Eingereicht am</th>
               <th class="text-right">Stunden</th>
               <th class="text-right">Betrag</th>
@@ -222,7 +222,9 @@ onMounted(() => {
             <tr v-for="item in filteredSubmissions" :key="item.id">
               <td class="text-medium-emphasis">#{{ item.id }}</td>
               <td class="font-weight-bold text-primary">{{ item.quartal_name }}</td>
-              <td class="text-medium-emphasis">{{ item.zeitraum }}</td>
+
+              <td class="font-weight-medium">{{ item.abteilung }}</td>
+
               <td class="text-medium-emphasis">{{ item.datum_erstellt }}</td>
               <td class="text-right">{{ item.stunden.toLocaleString('de-DE') }} Std.</td>
               <td class="text-right font-weight-bold text-green-darken-2">
