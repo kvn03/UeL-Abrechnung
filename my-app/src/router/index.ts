@@ -25,7 +25,7 @@ import AL_ChangeStundensatz from '../views/Abteilungsleiter/AL_ChangeStundensatz
 import GS_ChangeStundensatz from '../views/Geschaeftsstelle/GS_ChangeStundensatz.vue'
 import UelStundensatzUebersicht from '../views/Uebungsleiter/UEL_StundensatzUebersicht.vue'
 
-const API_URL = 'http://127.0.0.1:8000/api'
+const API_URL = import.meta.env.VITE_API_URL + '/api'
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: { name: 'Login' } },
