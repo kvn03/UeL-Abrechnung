@@ -24,7 +24,7 @@ class AbteilungsleiterController extends Controller
     {
         $userId = $request->user()->UserID; // oder ->id
 
-        // Admin darf alles (optional)
+        // Administrator darf alles (optional)
         if ($request->user()->isAdmin) return true;
 
         return UserRolleAbteilung::where('fk_userID', $userId)

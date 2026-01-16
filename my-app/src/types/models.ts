@@ -7,7 +7,7 @@ export interface Timesheet {
 
 export interface Rolle {
     id: number;
-    name: string; // z.B. 'Admin', 'Abteilungsleiter', 'Übungsleiter'
+    name: string; // z.B. 'Administrator', 'Abteilungsleiter', 'Übungsleiter'
     // Fügen Sie hier weitere Felder hinzu, die Ihre 'rolle_definitions' Tabelle hat
 }
 

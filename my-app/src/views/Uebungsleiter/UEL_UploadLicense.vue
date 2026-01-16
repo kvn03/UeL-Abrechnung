@@ -1,3 +1,159 @@
+<script setup lang="ts">
+import { ref, onMounted, reactive, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import axios from 'axios'
+
+const router = useRouter()
+const items = ref<any[]>([])
+const isLoading = ref(false)
+const isSaving = ref(false)
+const showDialog = ref(false)
+const successMessage = ref<string | null>(null)
+const formRef = ref()
+
+// Form State
+const editId = ref<number | null>(null)
+const form = reactive({
+  name: '',
+  nummer: '',
+  gueltigVon: '',
+  gueltigBis: '',
+  datei: ''
+})
+
+const API_URL = import.meta.env.VITE_API_URL + '/api/uebungsleiter/lizenzen'
+
+// --- FIX: Datum robust parsen (Nutzt lokale Zeit des Browsers) ---
+function safeDate(val: string | null | undefined): string {
+  if (!val) return '';
+
+  // Debugging: Damit du in der Konsole (F12) siehst, was wirklich ankommt
+  // console.log('safeDate Input:', val);
+
+  const date = new Date(val);
+  if (isNaN(date.getTime())) return '';
+
+  // Wir bauen den String YYYY-MM-DD aus der LOKALEN Zeit
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+// -------------------------------------------------------------
+
+function getExpirationStatus(dateStr: string) {
+  if (!dateStr) return { color: 'grey', bg: '', icon: 'mdi-help-circle', text: 'Unbekannt' };
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  const exp = new Date(dateStr);
+  const diffTime = exp.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) {
+    return { color: 'error', bg: 'bg-red-lighten-5', icon: 'mdi-alert-circle', text: 'ABGELAUFEN' };
+  } else if (diffDays <= 180) {
+    return { color: 'warning', bg: 'bg-orange-lighten-5', icon: 'mdi-clock-alert-outline', text: 'Läuft bald ab' };
+  }
+  return { color: 'success', bg: '', icon: 'mdi-check-circle-outline', text: 'Gültig' };
+}
+
+const sortedItems = computed(() => {
+  return [...items.value].sort((a, b) => {
+    return new Date(a.gueltigBis).getTime() - new Date(b.gueltigBis).getTime();
+  });
+});
+
+async function loadItems() {
+  isLoading.value = true
+  try {
+    const res = await axios.get(API_URL)
+    items.value = res.data
+  } catch (e) {
+    console.error(e)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+function openDialog(item?: any) {
+  if (formRef.value) formRef.value.resetValidation();
+
+  if (item) {
+    // --- BEARBEITEN ---
+    editId.value = item.ID || item.id;
+    form.name = item.name;
+    form.nummer = item.nummer ? String(item.nummer) : '';
+
+    // Hier nutzen wir die neue Funktion
+    form.gueltigVon = safeDate(item.gueltigVon);
+    form.gueltigBis = safeDate(item.gueltigBis);
+
+    form.datei = item.datei;
+  } else {
+    // --- NEU ERSTELLEN ---
+    editId.value = null;
+    form.name = '';
+    form.nummer = '';
+
+    // Für "Heute" als Standardwert
+    form.gueltigVon = safeDate(new Date().toISOString());
+
+    form.gueltigBis = '';
+    form.datei = '';
+  }
+  showDialog.value = true;
+}
+
+async function saveLicence() {
+  const { valid } = await formRef.value.validate()
+  if (!valid) return
+
+  isSaving.value = true
+  try {
+    const payload = {
+      ...form,
+      nummer: String(form.nummer),
+      id: editId.value
+    }
+
+    await axios.post(API_URL, payload)
+
+    showDialog.value = false
+    successMessage.value = 'Gespeichert.'
+    await loadItems()
+  } catch (e: any) {
+    console.error(e)
+    if (e.response?.data?.message) {
+      alert("Fehler: " + e.response.data.message);
+    }
+  } finally {
+    isSaving.value = false
+  }
+}
+
+async function deleteItem(item: any) {
+  if (!confirm(`Lizenz "${item.name}" wirklich löschen?`)) return
+  try {
+    await axios.delete(`${API_URL}/${item.ID}`)
+    await loadItems()
+  } catch(e) { console.error(e) }
+}
+
+function formatDate(d: string) {
+  if(!d) return ''
+  return new Date(d).toLocaleDateString('de-DE')
+}
+
+function goBack() { router.push({ name: 'Dashboard' }) }
+
+onMounted(() => {
+  loadItems()
+})
+</script>
+
 <template>
   <div class="page">
     <div class="d-flex justify-start mb-4">
@@ -12,124 +168,105 @@
     </div>
 
     <v-card elevation="6" class="pa-4">
-      <v-card-title class="pa-0 mb-4">
-        <h3 class="ma-0">Lizenzdaten angeben</h3>
+      <v-card-title class="d-flex justify-space-between align-center mb-4">
+        <div>
+          <h3 class="ma-0">Meine Lizenzen</h3>
+          <div class="text-caption text-medium-emphasis">Hier hinterlegst du deine Übungsleiterlizenzen.</div>
+        </div>
+        <v-btn color="primary" size="small" prepend-icon="mdi-plus" @click="openDialog()">
+          Neu
+        </v-btn>
       </v-card-title>
 
       <v-card-text class="pa-0">
-        <v-form>
-          <div class="field-grid">
-            <v-text-field
-                v-model="lizenznummer"
-                label="Lizenznummer"
-                variant="outlined"
-                density="comfortable"
-                maxlength="50"
-            />
+        <v-alert v-if="successMessage" type="success" variant="tonal" class="mb-4" closable>{{ successMessage }}</v-alert>
 
-            <v-text-field
-                v-model="lizenzName"
-                label="Lizenz-name"
-                variant="outlined"
-                density="comfortable"
-                maxlength="100"
-            />
+        <div v-if="isLoading" class="text-center py-4">
+          <v-progress-circular indeterminate color="primary"></v-progress-circular>
+        </div>
 
-            <v-text-field
-                v-model="gueltigVon"
-                label="Gültig von"
-                type="date"
-                variant="outlined"
-                density="comfortable"
-            />
+        <div v-else-if="sortedItems.length === 0" class="text-center text-medium-emphasis py-4">
+          Keine Lizenzen hinterlegt.
+        </div>
 
-            <v-text-field
-                v-model="gueltigBis"
-                label="Gültig bis"
-                type="date"
-                variant="outlined"
-                density="comfortable"
-            />
-          </div>
+        <v-list v-else lines="two" class="bg-transparent">
+          <template v-for="(item, index) in sortedItems" :key="item.ID">
 
-          <div class="d-flex justify-end mt-6">
-            <v-btn
-                color="primary"
-                prepend-icon="mdi-content-save"
-                :loading="isSaving"
-                @click="saveLicence"
+            <v-list-item
+                class="mb-2 rounded border"
+                :class="getExpirationStatus(item.gueltigBis).bg"
             >
-              Speichern
-            </v-btn>
-          </div>
-        </v-form>
+              <template v-slot:prepend>
+                <v-avatar :color="getExpirationStatus(item.gueltigBis).color" variant="tonal">
+                  <v-icon :icon="getExpirationStatus(item.gueltigBis).icon"></v-icon>
+                </v-avatar>
+              </template>
+
+              <v-list-item-title class="font-weight-bold">
+                {{ item.name }}
+                <span v-if="item.nummer" class="text-caption text-medium-emphasis">({{ item.nummer }})</span>
+              </v-list-item-title>
+
+              <v-list-item-subtitle class="mt-1 d-flex align-center flex-wrap gap-2">
+                <span>
+                  Gültig: {{ formatDate(item.gueltigVon) }} bis
+                  <span :class="'text-' + getExpirationStatus(item.gueltigBis).color" class="font-weight-bold">
+                    {{ formatDate(item.gueltigBis) }}
+                  </span>
+                </span>
+
+                <v-chip
+                    size="x-small"
+                    :color="getExpirationStatus(item.gueltigBis).color"
+                    class="font-weight-bold"
+                    variant="flat"
+                >
+                  {{ getExpirationStatus(item.gueltigBis).text }}
+                </v-chip>
+              </v-list-item-subtitle>
+
+              <template v-slot:append>
+                <div class="d-flex align-center">
+                  <v-btn v-if="item.datei" icon="mdi-link" variant="text" size="small" :href="item.datei" target="_blank" color="blue" title="Lizenzdatei öffnen"></v-btn>
+                  <v-btn icon="mdi-pencil" variant="text" size="small" color="grey-darken-1" @click="openDialog(item)"></v-btn>
+                  <v-btn icon="mdi-delete" variant="text" size="small" color="red" @click="deleteItem(item)"></v-btn>
+                </div>
+              </template>
+            </v-list-item>
+          </template>
+        </v-list>
       </v-card-text>
     </v-card>
+
+    <v-dialog v-model="showDialog" max-width="600px">
+      <v-card>
+        <v-card-title>{{ editId ? 'Lizenz bearbeiten' : 'Neue Lizenz hinzufügen' }}</v-card-title>
+        <v-card-text>
+          <v-form ref="formRef" @submit.prevent="saveLicence">
+            <div class="d-flex flex-column gap-2 mt-2">
+              <v-text-field v-model="form.name" label="Bezeichnung" variant="outlined" :rules="[v => !!v || 'Pflichtfeld']"></v-text-field>
+              <v-text-field v-model="form.nummer" label="Nummer (opt.)" variant="outlined"></v-text-field>
+              <div class="d-flex gap-2">
+                <v-text-field v-model="form.gueltigVon" label="Gültig Von" type="date" variant="outlined" :rules="[v => !!v || 'Pflichtfeld']"></v-text-field>
+                <v-text-field v-model="form.gueltigBis" label="Gültig Bis" type="date" variant="outlined" :rules="[v => !!v || 'Pflichtfeld']"></v-text-field>
+              </div>
+              <v-text-field v-model="form.datei" label="Link zur Datei" variant="outlined" placeholder="https://..." prepend-inner-icon="mdi-link"></v-text-field>
+            </div>
+          </v-form>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="showDialog = false">Abbrechen</v-btn>
+          <v-btn color="primary" :loading="isSaving" @click="saveLicence">Speichern</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-// import axios from 'axios'
-
-const router = useRouter()
-
-function goBack() {
-  router.push({ name: 'Dashboard' })
-}
-
-const lizenznummer = ref('')
-const lizenzName = ref('')
-const gueltigVon = ref('')
-const gueltigBis = ref('')
-
-const API_URL_PLACEHOLDER = import.meta.env.VITE_API_URL + '/api/uebungsleiter/lizenz'
-
-// Optional: Loading/Error State für UX
-const isSaving = ref(false)
-
-async function saveLicence() {
-  isSaving.value = true
-
-  const payload = {
-    lizenznummer: lizenznummer.value,
-    lizenz_name: lizenzName.value,
-    gueltig_von: gueltigVon.value,
-    gueltig_bis: gueltigBis.value,
-  }
-
-  try {
-    // Backend-Team trägt hier den finalen Endpoint ein.
-    // await axios.post(API_URL_PLACEHOLDER, payload)
-    console.log('Lizenzdaten speichern (Platzhalter):', API_URL_PLACEHOLDER, payload)
-
-    // Optional: Nach Speichern zurück zum Dashboard?
-    // goBack()
-  } catch (error) {
-    console.error('Fehler beim Speichern (Platzhalter):', error)
-  } finally {
-    isSaving.value = false
-  }
-}
-</script>
-
 <style scoped>
-.page {
-  padding: 24px;
-  max-width: 640px;
-  margin: 0 auto;
-}
-
-.field-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 16px;
-}
-
-@media (max-width: 600px) {
-  .field-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.page { padding: 24px; max-width: 800px; margin: 0 auto; }
+.gap-2 { gap: 8px; }
+.bg-red-lighten-5 { background-color: #FFEBEE !important; }
+.bg-orange-lighten-5 { background-color: #FFF3E0 !important; }
 </style>

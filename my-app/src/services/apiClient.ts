@@ -1,15 +1,19 @@
 import axios from 'axios';
 
+// Sicherstellen, dass wir eine saubere Base-URL haben
+const envUrl = import.meta.env.VITE_API_URL;
+// Wenn envUrl da ist, nimm es, sonst localhost. DANACH hängen wir /api an.
+const baseURL = (envUrl || 'http://localhost:8000') + '/api';
+
 const apiClient = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+    baseURL: baseURL,
     headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
     },
-    // withCredentials: true, // Entfernt: Für Token-Auth brauchen wir keine Cookies zwingend
 });
 
-// 1. Request Interceptor: Token vor jeder Anfrage automatisch einfügen
+// 1. Request Interceptor
 apiClient.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('auth_token');
@@ -23,17 +27,16 @@ apiClient.interceptors.request.use(
     }
 );
 
-// 2. Response Interceptor: Globale Fehlerbehandlung (z.B. Auto-Logout)
+// 2. Response Interceptor
 apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
-        // Wenn der Token ungültig oder abgelaufen ist (401 Unauthorized)
         if (error.response && error.response.status === 401) {
-            // Token entfernen, um "Endlosschleifen" bei ungültigem Token zu vermeiden
             localStorage.removeItem('auth_token');
 
-            // Optional: Seite neu laden oder User-Store resetten (passiert meist beim nächsten App-Start)
-            // window.location.reload();
+            // TIPP: Leite den User hier am besten direkt zum Login weiter,
+            // sonst bleibt er auf der Seite und wundert sich, warum nichts lädt.
+            // window.location.href = '/login';
         }
         return Promise.reject(error);
     }

@@ -148,6 +148,7 @@ class AbrechnungController extends Controller
         $abrechnungen = Abrechnung::where('createdBy', $userId)
             ->with([
                 'quartal',
+                'abteilung', // <--- WICHTIG: Abteilung mitladen
                 'stundeneintraege',
                 'statusLogs.statusDefinition'
             ])
@@ -192,6 +193,7 @@ class AbrechnungController extends Controller
                 'id' => $a->AbrechnungID,
                 'zeitraum' => $zeitraumString,
                 'quartal_name' => $a->quartal ? $a->quartal->bezeichnung : 'N/A',
+                'abteilung' => $a->abteilung ? $a->abteilung->name : 'Unbekannt',
                 'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
                 'gesamtBetrag' => $gesamtBetrag, // <--- NEU: Ins Frontend schicken
                 'status' => $statusName,

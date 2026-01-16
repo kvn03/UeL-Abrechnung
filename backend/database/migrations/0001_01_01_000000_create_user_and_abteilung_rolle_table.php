@@ -3,6 +3,8 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 return new class extends Migration
 {
@@ -22,6 +24,16 @@ return new class extends Migration
             $table->rememberToken();
             $table->timestamps();
         });
+        DB::table('user')->insert([
+            'name' => 'Administrator',
+            'vorname' => 'Super',
+            'email' => 'admin@example.com',
+            'password' => Hash::make('admin'), // Passwort immer hashen!
+            'isAdmin' => true,
+            'isGeschaeftsstelle' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
 
         /*Schema::create('stundensatz', function (Blueprint $table) {
@@ -62,7 +74,14 @@ return new class extends Migration
             $table->string('name');
             //$table->timestamps();
         });
-
+        DB::table('abteilung_definition')->insert([
+            ['name' => 'Turnen'],
+            ['name' => 'Fußball'],
+            ['name' => 'Handball'],
+            ['name' => 'Schwimmen'],
+            ['name' => 'Leichtathletik'],
+            ['name' => 'Badminton'],
+        ]);
 
 
         Schema::create('rolle_definition', function (Blueprint $table) {
@@ -70,6 +89,10 @@ return new class extends Migration
             $table->string('bezeichnung');
             //$table->timestamps();
         });
+        DB::table('rolle_definition')->insert([
+            ['RolleID' => 1, 'bezeichnung' => 'Uebungsleiter'],
+            ['RolleID' => 2, 'bezeichnung' => 'Abteilungsleiter']
+        ]);
 
 
 
@@ -80,7 +103,7 @@ return new class extends Migration
             $table->foreignId('fk_abteilungID')->constrained('abteilung_definition', 'AbteilungID')->onDelete('cascade');
             $table->foreignId('fk_userID')->constrained('user', 'UserID')->onDelete('cascade');
 
-            $table->timestamps();
+            //$table->timestamps();
         });
 
     }

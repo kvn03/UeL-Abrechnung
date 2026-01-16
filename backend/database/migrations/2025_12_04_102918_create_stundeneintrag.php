@@ -16,6 +16,7 @@ return new class extends Migration
             $table->time('ende')->nullable();
             $table->double('dauer')->nullable();
             $table->text('kurs')->nullable();
+            $table->decimal('verguetung', 10, 2)->nullable();
 
             // User Referenz
             $table->unsignedBigInteger('createdBy')->nullable();

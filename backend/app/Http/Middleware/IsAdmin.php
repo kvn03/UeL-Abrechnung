@@ -23,7 +23,7 @@ class IsAdmin
             return $next($request); // User darf passieren
         }
 
-        // 3. Zugriff verweigern, wenn kein Admin
+        // 3. Zugriff verweigern, wenn kein Administrator
         return response()->json(['message' => 'Forbidden: Admins only'], 403);
     }
 }

@@ -8,4 +8,5 @@ class RolleDefinition extends Model
 {
     protected $table = 'rolle_definition';
     protected $primaryKey = 'RolleID';
+    public $timestamps = false;
 }

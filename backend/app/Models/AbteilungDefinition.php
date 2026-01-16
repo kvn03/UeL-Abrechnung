@@ -19,5 +19,5 @@ class AbteilungDefinition extends Model
     protected $fillable = ['name'];
 
     // Falls du keine created_at/updated_at spalten hast:
-    // public $timestamps = false;
+    public $timestamps = false;
 }

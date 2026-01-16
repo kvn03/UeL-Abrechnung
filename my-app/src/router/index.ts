@@ -8,7 +8,7 @@ import Dashboard from '../views/Dashboard.vue'
 import EnterPassword from '../views/EnterPassword.vue'
 import SetPassword from '../views/SetPassword.vue'
 import NoPassword from '../views/NoPassword.vue'
-import CreateUser from '../views/CreateUser.vue'
+import CreateUser from '../views/Administrator/CreateUser.vue'
 import UelTimesheet from '../views/Uebungsleiter/UEL_Timesheet.vue'
 import Submitted from '../views/Submitted.vue'
 import UelDrafts from '../views/Uebungsleiter/UEL_Drafts.vue'
@@ -24,8 +24,11 @@ import UelUploadLicense from "../views/Uebungsleiter/UEL_UploadLicense.vue"
 import AL_ChangeStundensatz from '../views/Abteilungsleiter/AL_ChangeStundensatz.vue'
 import GS_ChangeStundensatz from '../views/Geschaeftsstelle/GS_ChangeStundensatz.vue'
 import UelStundensatzUebersicht from '../views/Uebungsleiter/UEL_StundensatzUebersicht.vue'
+import AdminDepartments from "../views/Administrator/AdminDepartments.vue"
+import AdminZuschlag from "../views/Administrator/AdminZuschlag.vue"
+import AdminLimits from "../views/Administrator/AdminLimits.vue";
 
-const API_URL = 'http://127.0.0.1:8000/api'
+const API_URL = import.meta.env.VITE_API_URL + '/api'
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: { name: 'Login' } },
@@ -50,6 +53,9 @@ const routes: RouteRecordRaw[] = [
     { path: '/geschaeftsstelle/stundensaetze', name: 'ManageAllRates', component: GS_ChangeStundensatz, meta: { requiresAuth: true }},
     {path: '/uebungsleiter/stundensaetze', name: 'MyRates', component: UelStundensatzUebersicht, meta: { requiresAuth: true }},
     {path: '/al-timesheet-history', name: 'ALTimesheetHistory', component: AlTimesheetHistory, meta: { requiresAuth: true }},
+    {path: '/admin/abteilungen', name: 'AdminDepartments', component: AdminDepartments, meta: { requiresAuth: true }},
+    {path: '/admin/zuschlaege', name: 'AdminZuschlag', component: AdminZuschlag, meta: {requiresAuth: true}},
+    {path: '/limits', name: 'AdminLimits', component: AdminLimits, meta: { requiresAuth: true }},
 
 ]
 

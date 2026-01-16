@@ -22,7 +22,7 @@ class StundensatzController extends Controller
         }
 
         // WICHTIG: Hier die ID eintragen, die "Übungsleiter" in deiner Tabelle 'rolle_definition' hat.
-        // Falls du nicht sicher bist, schau in die DB. Oft ist Admin=1, ÜL=2.
+        // Falls du nicht sicher bist, schau in die DB. Oft ist Administrator=1, ÜL=2.
         $uelRolleId = 2;
 
         // 1. Hole alle User der Abteilung, die die Rolle Übungsleiter haben
@@ -69,7 +69,7 @@ class StundensatzController extends Controller
             'user_id'      => 'required|integer|exists:user,UserID',
             'abteilung_id' => 'required|integer|exists:abteilung_definition,AbteilungID', // <--- NEU & WICHTIG
             'satz'         => 'required|numeric|min:0',
-            'gueltig_ab'   => 'required|date|after:today',
+            'gueltig_ab'   => 'required|date',
         ]);
 
         $userId      = $validated['user_id'];

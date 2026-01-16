@@ -30,6 +30,8 @@ class UserRolleAbteilung extends Model
         return $this->belongsTo(AbteilungDefinition::class, 'fk_abteilungID', 'AbteilungID');
     }
 
+    public $timestamps = false;
+
     // Falls deine Tabelle keine created_at/updated_at Spalten hat:
     // public $timestamps = false;
 }

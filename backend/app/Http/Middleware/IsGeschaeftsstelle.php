@@ -18,7 +18,7 @@ class IsGeschaeftsstelle
 
         $user = Auth::user();
 
-        // 2. Check: Ist Geschäftsstelle ODER Admin?
+        // 2. Check: Ist Geschäftsstelle ODER Administrator?
         // (Admins sollten meistens alles dürfen, um Support zu leisten)
         if ($user->isGeschaeftsstelle || $user->isAdmin) {
             return $next($request);

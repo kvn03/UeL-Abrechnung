@@ -132,9 +132,9 @@ function openEditDialog(user: UserWithRate) {
   selectedUser.value = user
   newRate.value = user.aktuellerSatz || ''
 
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  validFrom.value = tomorrow.toISOString().split('T')[0]
+  // CHANGE: Default to "Today" instead of "Tomorrow"
+  const today = new Date()
+  validFrom.value = today.toISOString().split('T')[0]
 
   showDialog.value = true
 }
@@ -341,7 +341,8 @@ function goBack() {
         <v-card-text class="pt-4">
           <v-form ref="editForm" @submit.prevent="saveRate">
             <v-alert type="info" variant="tonal" density="compact" class="mb-4 text-caption">
-              Der aktuelle Satz ({{ formatCurrency(selectedUser.aktuellerSatz) }}) wird zum Tag vor dem "Gültig ab"-Datum beendet.
+              Ein neuer Eintrag wird erstellt. Der vorherige Satz wird (falls vorhanden) automatisch zum Tag vor dem hier gewählten Datum beendet.
+              <br><strong>Hinweis:</strong> Rückwirkende Änderungen können bereits erstellte Abrechnungen beeinflussen!
             </v-alert>
 
             <v-text-field

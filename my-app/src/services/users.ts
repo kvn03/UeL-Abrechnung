@@ -26,8 +26,30 @@ export interface UpdateUserRolesPayload {
 }
 
 export async function fetchUsers(): Promise<UserDto[]> {
-    const response = await apiClient.get<{ users: UserDto[] }>('/admin/users');
-    return response.data.users;
+    // 1. URL Prüfen: Heißt die Route wirklich '/admin/users' oder eher '/api/admin/users'?
+    // Falls dein apiClient keine baseURL mit '/api' hat, musst du das hier ggf. anpassen.
+    const response = await apiClient.get<any>('/admin/users');
+
+    // 2. Robustes Auslesen der Daten:
+
+    // Fall A: API liefert { data: [...] } (Standard bei Laravel API Resources)
+    if (response.data?.data && Array.isArray(response.data.data)) {
+        return response.data.data;
+    }
+
+    // Fall B: API liefert direkt das Array [...]
+    if (Array.isArray(response.data)) {
+        return response.data;
+    }
+
+    // Fall C: API liefert dein erwartetes { users: [...] }
+    if (response.data?.users && Array.isArray(response.data.users)) {
+        return response.data.users;
+    }
+
+    // Fallback: Leeres Array zurückgeben, damit das Frontend nicht abstürzt
+    console.warn('Unerwartetes Antwortformat von /admin/users:', response.data);
+    return [];
 }
 
 export async function updateUserRoles(userId: number, payload: UpdateUserRolesPayload): Promise<void> {
