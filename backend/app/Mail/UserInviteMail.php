@@ -36,7 +36,7 @@ class UserInviteMail extends Mailable
      */
     public function content(): Content
     {
-        $frontendBase = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
+        $frontendBase = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', 'https://uel-abrechnung-frontend-production.up.railway.app')), '/');
         $frontendUrl = $frontendBase . '/set-password';
 
         $queryParams = http_build_query([
