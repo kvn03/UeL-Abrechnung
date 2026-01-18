@@ -32,6 +32,7 @@ interface TimesheetEntry {
   kurs: string
   betrag: number | null
   fk_abrechnungID?: number
+  isFeiertag?: boolean
 }
 
 interface Submission {
@@ -326,14 +327,30 @@ onMounted(() => {
                   </tr>
                   </thead>
                   <tbody>
-                  <tr v-for="(detail) in item.details" :key="detail.EintragID">
-                    <td>{{ formatDate(detail.datum) }}</td>
+                  <tr
+                      v-for="(detail) in item.details"
+                      :key="detail.EintragID"
+                      :class="{ 'bg-orange-lighten-5': detail.isFeiertag }"
+                  >
+
+                    <td>{{ formatDate(detail.datum) }}
+                      <span v-if="detail.isFeiertag" class="text-caption text-orange-darken-2 ml-1 font-weight-bold">
+      (Feiertag)
+    </span></td>
+
 
                     <td>{{ formatTime(detail.beginn) }} - {{ formatTime(detail.ende) }}</td>
 
-                    <td>{{ detail.kurs }}</td>
+                    <td>
+                      {{ detail.kurs }}
+                    </td>
+
                     <td class="text-right">{{ formatNumber(detail.dauer) }} Std.</td>
-                    <td class="text-right font-weight-medium">{{ formatCurrency(detail.betrag) }}</td>
+
+                    <td class="text-right font-weight-medium" :class="{ 'text-orange-darken-2': detail.isFeiertag }">
+                      {{ formatCurrency(detail.betrag) }}
+                    </td>
+
                     <td class="text-right">
                       <v-btn icon="mdi-pencil" size="x-small" variant="text" color="blue" class="mr-1" @click="openEditDialog(detail, item.AbrechnungID)"></v-btn>
                       <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="deleteEntry(detail, item.AbrechnungID)"></v-btn>

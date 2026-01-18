@@ -41,7 +41,7 @@ onMounted(() => {
 
 const emailRules = [
   (v: string) => !!v?.trim() || 'E-Mail ist erforderlich',
-  (v: string) => /.+@.+\..+/.test(v) || 'E-Mail muss gültig sein',
+  (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || 'E-Mail muss gültig sein',
 ]
 
 const requiredRules = [

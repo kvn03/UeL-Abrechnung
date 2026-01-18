@@ -8,6 +8,8 @@ use App\Models\AbrechnungStatusLog;
 use App\Models\Quartal;
 use App\Models\Stundeneintrag;
 use App\Models\StundeneintragStatusLog;
+use App\Models\Zuschlag;
+use Yasumi\Yasumi;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -148,46 +150,61 @@ class AbrechnungController extends Controller
         $abrechnungen = Abrechnung::where('createdBy', $userId)
             ->with([
                 'quartal',
-                'abteilung', // <--- WICHTIG: Abteilung mitladen
+                'abteilung',
                 'stundeneintraege',
                 'statusLogs.statusDefinition'
             ])
             ->orderBy('createdAt', 'desc')
             ->get();
 
-        $result = $abrechnungen->map(function($a) use ($userId) {
+        // Alle Zuschläge einmal laden
+        $alleZuschlaege = Zuschlag::orderBy('gueltigVon')->get();
 
-            // --- NEU: Berechnung Gesamtbetrag ---
-            // 1. Sätze laden für diesen User in der Abteilung der Abrechnung
+        $result = $abrechnungen->map(function($a) use ($userId, $alleZuschlaege) {
+
+            // Sätze laden
             $rates = DB::table('stundensatz')
                 ->where('fk_userID', $userId)
                 ->where('fk_abteilungID', $a->fk_abteilung)
                 ->get();
 
-            // 2. Summe berechnen
-            $gesamtBetrag = $a->stundeneintraege->sum(function($eintrag) use ($rates) {
+            // Summe berechnen MIT Feiertagszuschlag
+            $gesamtBetrag = $a->stundeneintraege->sum(function($eintrag) use ($rates, $alleZuschlaege) {
                 $datum = \Carbon\Carbon::parse($eintrag->datum)->startOfDay();
 
-                // Passenden Satz finden
+                // Satz finden
                 $validRate = $rates->first(function($rate) use ($datum) {
                     $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
                     $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
                     return $datum->gte($start) && ($end === null || $datum->lte($end));
                 });
-
                 $satz = $validRate ? (float)$validRate->satz : 0;
-                return round($eintrag->dauer * $satz, 2);
+
+                // Feiertags-Logik
+                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $datum->year);
+                $isFeiertag = $provider->isHoliday($datum);
+                $multiplikator = 1.0;
+
+                if ($isFeiertag) {
+                    $passenderZuschlag = $alleZuschlaege->first(function($z) use ($datum) {
+                        return $datum->gte($z->gueltigVon) &&
+                            ($z->gueltigBis === null || $datum->lte($z->gueltigBis));
+                    });
+                    if ($passenderZuschlag) {
+                        $multiplikator = $passenderZuschlag->faktor;
+                    }
+                }
+
+                return round($eintrag->dauer * $satz * $multiplikator, 2);
             });
-            // ------------------------------------
 
             $neuestesLog = $a->statusLogs->sortByDesc('modifiedAt')->first();
             $statusName = $neuestesLog ? $neuestesLog->statusDefinition->name : 'Unbekannt';
             $statusId   = $neuestesLog ? $neuestesLog->fk_statusID : 0;
 
-            $zeitraumString = 'Unbekannt';
-            if ($a->quartal) {
-                $zeitraumString = $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y');
-            }
+            $zeitraumString = $a->quartal
+                ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
+                : 'Unbekannt';
 
             return [
                 'id' => $a->AbrechnungID,
@@ -195,7 +212,7 @@ class AbrechnungController extends Controller
                 'quartal_name' => $a->quartal ? $a->quartal->bezeichnung : 'N/A',
                 'abteilung' => $a->abteilung ? $a->abteilung->name : 'Unbekannt',
                 'stunden' => round($a->stundeneintraege->sum('dauer'), 2),
-                'gesamtBetrag' => $gesamtBetrag, // <--- NEU: Ins Frontend schicken
+                'gesamtBetrag' => $gesamtBetrag,
                 'status' => $statusName,
                 'status_id' => $statusId,
                 'datum_erstellt' => $a->createdAt->format('d.m.Y'),
@@ -211,7 +228,6 @@ class AbrechnungController extends Controller
     {
         $userId = Auth::id();
 
-        // 1. Abrechnung laden
         $abrechnung = Abrechnung::where('AbrechnungID', $id)
             ->where('createdBy', $userId)
             ->with(['quartal', 'statusLogs.statusDefinition'])
@@ -221,14 +237,14 @@ class AbrechnungController extends Controller
             return response()->json(['message' => 'Abrechnung nicht gefunden'], 404);
         }
 
-        // --- NEU: Stundensätze laden (einmalig für die Abrechnung) ---
         $rates = DB::table('stundensatz')
             ->where('fk_userID', $userId)
             ->where('fk_abteilungID', $abrechnung->fk_abteilung)
             ->get();
-        // -------------------------------------------------------------
 
-        // 2. Historie (bleibt gleich)
+        // Zuschläge laden
+        $alleZuschlaege = Zuschlag::orderBy('gueltigVon')->get();
+
         $abrechnungHistory = $abrechnung->statusLogs ? $abrechnung->statusLogs->map(function ($log) {
             return [
                 'date'       => $log->modifiedAt,
@@ -238,27 +254,41 @@ class AbrechnungController extends Controller
             ];
         })->sortByDesc('date')->values() : [];
 
-        // 3. Einträge laden
         $eintraege = Stundeneintrag::where('fk_abrechnungID', $abrechnung->AbrechnungID)
             ->with(['auditLogs', 'statusLogs.statusDefinition'])
             ->orderBy('datum', 'asc')
             ->get();
 
-        // 4. Einträge formatieren & PREIS BERECHNEN
-        $eintraegeFormatted = $eintraege->map(function ($eintrag) use ($rates) {
+        $eintraegeFormatted = $eintraege->map(function ($eintrag) use ($rates, $alleZuschlaege) {
 
-            // --- NEU: Preisberechnung pro Eintrag ---
             $datum = \Carbon\Carbon::parse($eintrag->datum)->startOfDay();
+
+            // Satz finden
             $validRate = $rates->first(function($rate) use ($datum) {
                 $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
                 $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
                 return $datum->gte($start) && ($end === null || $datum->lte($end));
             });
             $satz = $validRate ? (float)$validRate->satz : 0;
-            $betrag = round($eintrag->dauer * $satz, 2);
-            // ----------------------------------------
 
-            // ... (Hier dein bestehender Code für Audit/Status Logs) ...
+            // Feiertags-Logik
+            $provider = Yasumi::create('Germany/NorthRhineWestphalia', $datum->year);
+            $isFeiertag = $provider->isHoliday($datum);
+            $multiplikator = 1.0;
+
+            if ($isFeiertag) {
+                $passenderZuschlag = $alleZuschlaege->first(function($z) use ($datum) {
+                    return $datum->gte($z->gueltigVon) &&
+                        ($z->gueltigBis === null || $datum->lte($z->gueltigBis));
+                });
+                if ($passenderZuschlag) {
+                    $multiplikator = $passenderZuschlag->faktor;
+                }
+            }
+
+            $betrag = round($eintrag->dauer * $satz * $multiplikator, 2);
+
+            // History Logs (bleibt gleich)
             $audits = $eintrag->auditLogs ? $eintrag->auditLogs->map(function ($log) {
                 return [
                     'type' => 'audit', 'date' => $log->modifiedAt,
@@ -284,7 +314,8 @@ class AbrechnungController extends Controller
                 'ende'  => \Carbon\Carbon::parse($eintrag->ende)->format('H:i'),
                 'dauer' => (float) $eintrag->dauer,
                 'kurs'  => $eintrag->kurs ?? '',
-                'betrag' => $betrag, // <--- NEU: Ins Frontend schicken
+                'betrag' => $betrag,
+                'isFeiertag' => $isFeiertag, // <--- WICHTIG: Flag für Frontend
                 'history' => $history
             ];
         });

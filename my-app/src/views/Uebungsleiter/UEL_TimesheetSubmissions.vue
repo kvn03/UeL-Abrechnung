@@ -47,6 +47,7 @@ interface DetailEntry {
   dauer: number
   kurs: string
   betrag: number | null
+  isFeiertag?: boolean // <--- NEU
   history: HistoryEntry[]
 }
 
@@ -335,17 +336,40 @@ onMounted(() => {
                     v-for="entry in selectedAbrechnungDetails.eintraege"
                     :key="entry.id"
                 >
-                  <v-expansion-panel-title>
+                  <v-expansion-panel-title :class="{ 'bg-orange-lighten-5': entry.isFeiertag }">
                     <v-row no-gutters align="center">
-                      <v-col cols="3" class="font-weight-bold">{{ entry.datum }}</v-col>
-                      <v-col cols="3">{{ entry.kurs }}</v-col>
+                      <v-col cols="3" class="font-weight-bold d-flex align-center">
+                        {{ entry.datum }}
+                        <v-icon
+                            v-if="entry.isFeiertag"
+                            icon="mdi-party-popper"
+                            color="orange-darken-2"
+                            size="small"
+                            class="ml-2"
+                            title="Feiertagszuschlag"
+                        ></v-icon>
+                      </v-col>
+
+                      <v-col cols="3">
+                        {{ entry.kurs }}
+                        <span v-if="entry.isFeiertag" class="text-caption text-orange-darken-2 font-weight-bold ml-1 d-block d-sm-inline">
+                          (Feiertag)
+                        </span>
+                      </v-col>
+
                       <v-col cols="2" class="text-medium-emphasis text-caption">
                         {{ entry.start }} - {{ entry.ende }}
                       </v-col>
+
                       <v-col cols="2" class="text-right pr-2">
                         {{ entry.dauer }} Std.
                       </v-col>
-                      <v-col cols="2" class="text-right pr-4 font-weight-medium text-green-darken-2">
+
+                      <v-col
+                          cols="2"
+                          class="text-right pr-4 font-weight-medium"
+                          :class="entry.isFeiertag ? 'text-orange-darken-2' : 'text-green-darken-2'"
+                      >
                         {{ formatCurrency(entry.betrag) }}
                       </v-col>
                     </v-row>

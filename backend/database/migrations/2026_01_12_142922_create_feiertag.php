@@ -3,6 +3,9 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Yasumi\Yasumi;
+use App\Models\Feiertag;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {

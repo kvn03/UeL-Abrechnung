@@ -135,6 +135,10 @@
       <path value="$PROJECT_DIR$/backend/vendor/vlucas/phpdotenv" />
       <path value="$PROJECT_DIR$/backend/vendor/dflydev/dot-access-data" />
       <path value="$PROJECT_DIR$/backend/vendor/egulias/email-validator" />
+      <path value="$PROJECT_DIR$/backend/vendor/azuyalabs/yasumi" />
+      <path value="$PROJECT_DIR$/backend/vendor/symfony/brevo-mailer" />
+      <path value="$PROJECT_DIR$/backend/vendor/symfony/http-client-contracts" />
+      <path value="$PROJECT_DIR$/backend/vendor/symfony/http-client" />
     </include_path>
   </component>
   <component name="PhpProjectSharedConfiguration" php_language_level="8.2" />

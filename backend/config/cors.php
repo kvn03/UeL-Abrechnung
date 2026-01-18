@@ -19,7 +19,13 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'], // Erlaubt alle Quellen (wichtig für Localhost Entwicklung)
+    //'allowed_origins' => ['*'], // Erlaubt alle Quellen (wichtig für Localhost Entwicklung)
+    'allowed_origins' => [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'https://uel-abrechnung-frontend-production.up.railway.app',
+    ],
+
 
     'allowed_origins_patterns' => [],
 

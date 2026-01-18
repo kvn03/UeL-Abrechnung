@@ -9,6 +9,8 @@ use App\Models\StundeneintragAuditLog;
 use App\Models\StundeneintragStatusLog;
 use App\Models\Stundensatz;
 use Carbon\Carbon;
+use App\Models\Zuschlag;
+use Yasumi\Yasumi;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -33,47 +35,62 @@ class GeschaeftsstelleController extends Controller
             'abteilung',
             'stundeneintraege',
             'quartal',
-            'statusLogs' => function($q) {
-                $q->orderBy('modifiedAt', 'desc');
-            },
+            'statusLogs' => function($q) { $q->orderBy('modifiedAt', 'desc'); },
             'statusLogs.modifier'
         ])->get();
 
-        // 2. Filtern: Nur die, wo der aktuelle Status 21 ist
+        // 2. Filtern
         $filterteAbrechnungen = $abrechnungen->filter(function($a) use ($statusGenehmigtAL) {
             $neuestesLog = $a->statusLogs->first();
             return $neuestesLog && $neuestesLog->fk_statusID == $statusGenehmigtAL;
         });
 
-        // 3. Mapping & Berechnung
-        $result = $filterteAbrechnungen->map(function($a) use ($statusGenehmigtAL) {
+        // --- NEU: Zuschläge laden ---
+        $alleZuschlaege = Zuschlag::orderBy('gueltigVon')->get();
 
-            // Logik für Genehmiger
+        // 3. Mapping
+        $result = $filterteAbrechnungen->map(function($a) use ($statusGenehmigtAL, $alleZuschlaege) {
+
+            // Genehmiger Logik
             $genehmigungsLog = $a->statusLogs->firstWhere('fk_statusID', $statusGenehmigtAL);
             $genehmigerName = ($genehmigungsLog && $genehmigungsLog->modifier)
                 ? $genehmigungsLog->modifier->vorname . ' ' . $genehmigungsLog->modifier->name
                 : 'Unbekannt';
 
-            // --- STUNDENSÄTZE LADEN ---
-            // Wir laden die Sätze für diesen Mitarbeiter in dieser Abteilung
+            // Sätze laden
             $rates = DB::table('stundensatz')
                 ->where('fk_userID', $a->createdBy)
                 ->where('fk_abteilungID', $a->fk_abteilung)
                 ->get();
 
-            // --- DETAILS BERECHNEN ---
-            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+            // Details berechnen
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates, $alleZuschlaege) {
                 $eintragDatum = \Carbon\Carbon::parse($e->datum)->startOfDay();
 
-                // Passenden Satz finden
+                // Satz finden
                 $validRate = $rates->first(function($rate) use ($eintragDatum) {
                     $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
                     $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
                     return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
                 });
-
                 $satz = $validRate ? (float)$validRate->satz : 0;
-                $betrag = round($e->dauer * $satz, 2);
+
+                // --- NEU: Feiertag + Zuschlag ---
+                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $isFeiertag = $provider->isHoliday($eintragDatum);
+                $multiplikator = 1.0;
+
+                if ($isFeiertag) {
+                    $passenderZuschlag = $alleZuschlaege->first(function($z) use ($eintragDatum) {
+                        return $eintragDatum->gte($z->gueltigVon) &&
+                            ($z->gueltigBis === null || $eintragDatum->lte($z->gueltigBis));
+                    });
+                    if ($passenderZuschlag) {
+                        $multiplikator = $passenderZuschlag->faktor; // z.B. 1.35
+                    }
+                }
+
+                $betrag = round($e->dauer * $satz * $multiplikator, 2);
 
                 return [
                     'EintragID' => $e->EintragID,
@@ -82,14 +99,11 @@ class GeschaeftsstelleController extends Controller
                     'ende'      => \Carbon\Carbon::parse($e->ende)->format('H:i'),
                     'dauer'     => $e->dauer,
                     'kurs'      => $e->kurs,
-                    'betrag'    => $betrag // <--- NEU
+                    'betrag'    => $betrag,
+                    'isFeiertag'=> $isFeiertag // <--- NEU
                 ];
             });
 
-            // Gesamtbetrag summieren
-            $gesamtBetrag = $mappedDetails->sum('betrag');
-
-            // Metadaten
             $quartalName = $a->quartal ? $a->quartal->bezeichnung : '';
             $zeitraum = $a->quartal
                 ? $a->quartal->beginn->format('d.m.Y') . ' - ' . $a->quartal->ende->format('d.m.Y')
@@ -100,7 +114,7 @@ class GeschaeftsstelleController extends Controller
                 'mitarbeiterName'  => $a->creator->vorname . ' ' . $a->creator->name,
                 'abteilung'        => $a->abteilung->name ?? 'Unbekannt',
                 'stunden'          => round($a->stundeneintraege->sum('dauer'), 2),
-                'gesamtBetrag'     => $gesamtBetrag, // <--- NEU
+                'gesamtBetrag'     => $mappedDetails->sum('betrag'),
                 'quartal'          => $quartalName,
                 'zeitraum'         => $zeitraum,
                 'datumGenehmigtAL' => $genehmigungsLog ? \Carbon\Carbon::parse($genehmigungsLog->modifiedAt)->format('d.m.Y') : '-',
@@ -122,7 +136,7 @@ class GeschaeftsstelleController extends Controller
         $year = (int) $request->query('year', Carbon::now()->year);
         $quarter = $request->query('quarter');
 
-        // 1. Zeitraum bestimmen
+        // 1. Zeitraum (Code bleibt gleich...)
         if ($quarter === 'Q1') {
             $start = Carbon::create($year, 1, 1)->startOfDay();
             $end   = Carbon::create($year, 3, 31)->endOfDay();
@@ -136,18 +150,16 @@ class GeschaeftsstelleController extends Controller
             $start = Carbon::create($year, 10, 1)->startOfDay();
             $end   = Carbon::create($year, 12, 31)->endOfDay();
         } else {
-            // Fallback: Ganzes Jahr
             $start = Carbon::create($year, 1, 1)->startOfDay();
             $end   = Carbon::create($year, 12, 31)->endOfDay();
         }
 
-        // 2. Daten laden (Kein Status-Filter! Wir wollen alles sehen)
+        // 2. Daten laden
         $abrechnungen = Abrechnung::with([
             'creator',
             'abteilung',
             'stundeneintraege',
             'quartal',
-            // Wir laden die Status-Definition, um den Namen (z.B. "Bezahlt") zu haben
             'statusLogs.statusDefinition',
             'statusLogs.modifier'
         ])
@@ -155,39 +167,57 @@ class GeschaeftsstelleController extends Controller
                 $q->whereBetween('beginn', [$start, $end])
                     ->orWhereBetween('ende', [$start, $end]);
             })
-            ->orderBy('AbrechnungID', 'desc') // Neueste zuerst
+            ->orderBy('AbrechnungID', 'desc')
             ->get();
 
-        // 3. Mapping & Preisberechnung
-        $result = $abrechnungen->map(function ($a) {
+        // --- NEU: Zuschläge laden ---
+        $alleZuschlaege = Zuschlag::orderBy('gueltigVon')->get();
 
-            // Aktueller Status
+        // 3. Mapping
+        $result = $abrechnungen->map(function ($a) use ($alleZuschlaege) {
+
             $latestLog = $a->statusLogs->sortByDesc('modifiedAt')->first();
             $statusName = $latestLog && $latestLog->statusDefinition ? $latestLog->statusDefinition->name : 'Unbekannt';
             $statusId = $latestLog ? $latestLog->fk_statusID : 0;
 
-            // Stundensätze laden für Historisierung
             $rates = DB::table('stundensatz')
                 ->where('fk_userID', $a->createdBy)
                 ->where('fk_abteilungID', $a->fk_abteilung)
                 ->get();
 
-            // Details berechnen
-            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates, $alleZuschlaege) {
                 $eintragDatum = Carbon::parse($e->datum)->startOfDay();
+
                 $validRate = $rates->first(function($rate) use ($eintragDatum) {
                     $start = Carbon::parse($rate->gueltigVon)->startOfDay();
                     $end   = $rate->gueltigBis ? Carbon::parse($rate->gueltigBis)->endOfDay() : null;
                     return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
                 });
                 $satz = $validRate ? (float)$validRate->satz : 0;
-                $betrag = round($e->dauer * $satz, 2);
+
+                // --- NEU: Feiertag + Zuschlag ---
+                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $isFeiertag = $provider->isHoliday($eintragDatum);
+                $multiplikator = 1.0;
+
+                if ($isFeiertag) {
+                    $passenderZuschlag = $alleZuschlaege->first(function($z) use ($eintragDatum) {
+                        return $eintragDatum->gte($z->gueltigVon) &&
+                            ($z->gueltigBis === null || $eintragDatum->lte($z->gueltigBis));
+                    });
+                    if ($passenderZuschlag) {
+                        $multiplikator = $passenderZuschlag->faktor;
+                    }
+                }
+
+                $betrag = round($e->dauer * $satz * $multiplikator, 2);
 
                 return [
                     'datum'  => $e->datum,
                     'dauer'  => $e->dauer,
                     'kurs'   => $e->kurs,
-                    'betrag' => $betrag
+                    'betrag' => $betrag,
+                    'isFeiertag' => $isFeiertag // <--- NEU
                 ];
             });
 
@@ -200,15 +230,14 @@ class GeschaeftsstelleController extends Controller
                 'mitarbeiterName' => $a->creator->vorname . ' ' . $a->creator->name,
                 'abteilung'       => $a->abteilung->name ?? 'Unbekannt',
                 'stunden'         => round($a->stundeneintraege->sum('dauer'), 2),
-                'gesamtBetrag'    => $mappedDetails->sum('betrag'), // Summe
+                'gesamtBetrag'    => $mappedDetails->sum('betrag'),
                 'zeitraum'        => $zeitraumText,
                 'quartal'         => $a->quartal ? $a->quartal->bezeichnung : '',
                 'status'          => $statusName,
                 'status_id'       => $statusId,
-                'details'         => $mappedDetails, // Für den Detail-Dialog
-
-                // Historie für den Dialog
+                'details'         => $mappedDetails,
                 'history' => $a->statusLogs->sortByDesc('modifiedAt')->map(function($log) {
+                    // ... (History Code bleibt gleich) ...
                     return [
                         'date' => Carbon::parse($log->modifiedAt)->format('d.m.Y H:i'),
                         'status' => $log->statusDefinition->name ?? 'Status',
@@ -659,43 +688,55 @@ class GeschaeftsstelleController extends Controller
             'statusLogs.modifier'
         ])->get();
 
-        // Filtern auf Status 22
         $filterteAbrechnungen = $abrechnungen->filter(function($a) use ($statusReadyForPayment) {
             $neuestesLog = $a->statusLogs->first();
             return $neuestesLog && $neuestesLog->fk_statusID == $statusReadyForPayment;
         });
 
-        $result = $filterteAbrechnungen->map(function($a) {
+        // Zuschläge laden
+        $alleZuschlaege = \App\Models\Zuschlag::orderBy('gueltigVon')->get();
 
-            // 1. Genehmigung AL (Status 21)
+        $result = $filterteAbrechnungen->map(function($a) use ($alleZuschlaege) {
+
             $logAL = $a->statusLogs->firstWhere('fk_statusID', 21);
-            $alName = ($logAL && $logAL->modifier)
-                ? $logAL->modifier->vorname . ' ' . $logAL->modifier->name
-                : '-';
+            $alName = ($logAL && $logAL->modifier) ? $logAL->modifier->vorname . ' ' . $logAL->modifier->name : '-';
             $alDatum = $logAL ? \Carbon\Carbon::parse($logAL->modifiedAt)->format('d.m.Y') : '-';
 
-            // 2. Freigabe GS (Status 22)
             $logGS = $a->statusLogs->firstWhere('fk_statusID', 22);
-            $gsName = ($logGS && $logGS->modifier)
-                ? $logGS->modifier->vorname . ' ' . $logGS->modifier->name
-                : 'Geschäftsstelle';
+            $gsName = ($logGS && $logGS->modifier) ? $logGS->modifier->vorname . ' ' . $logGS->modifier->name : 'GS';
             $gsDatum = $logGS ? \Carbon\Carbon::parse($logGS->modifiedAt)->format('d.m.Y') : '-';
 
-            // Stundensätze & Beträge berechnen
             $rates = DB::table('stundensatz')
                 ->where('fk_userID', $a->createdBy)
                 ->where('fk_abteilungID', $a->fk_abteilung)
                 ->get();
 
-            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates) {
+            $mappedDetails = $a->stundeneintraege->map(function($e) use ($rates, $alleZuschlaege) {
                 $eintragDatum = \Carbon\Carbon::parse($e->datum)->startOfDay();
+
                 $validRate = $rates->first(function($rate) use ($eintragDatum) {
                     $start = \Carbon\Carbon::parse($rate->gueltigVon)->startOfDay();
                     $end   = $rate->gueltigBis ? \Carbon\Carbon::parse($rate->gueltigBis)->endOfDay() : null;
                     return $eintragDatum->gte($start) && ($end === null || $eintragDatum->lte($end));
                 });
                 $satz = $validRate ? (float)$validRate->satz : 0;
-                $betrag = round($e->dauer * $satz, 2);
+
+                // Feiertag + Zuschlag
+                $provider = \Yasumi\Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $isFeiertag = $provider->isHoliday($eintragDatum);
+                $multiplikator = 1.0;
+
+                if ($isFeiertag) {
+                    $passenderZuschlag = $alleZuschlaege->first(function($z) use ($eintragDatum) {
+                        return $eintragDatum->gte($z->gueltigVon) &&
+                            ($z->gueltigBis === null || $eintragDatum->lte($z->gueltigBis));
+                    });
+                    if ($passenderZuschlag) {
+                        $multiplikator = $passenderZuschlag->faktor;
+                    }
+                }
+
+                $betrag = round($e->dauer * $satz * $multiplikator, 2);
 
                 return [
                     'datum'  => $e->datum,
@@ -703,11 +744,11 @@ class GeschaeftsstelleController extends Controller
                     'ende'   => $e->ende,
                     'dauer'  => $e->dauer,
                     'kurs'   => $e->kurs,
-                    'betrag' => $betrag
+                    'betrag' => $betrag,
+                    'isFeiertag' => $isFeiertag // <--- HIER WAR DER FEHLER (Das fehlte)
                 ];
             });
 
-            // IBAN aus Stammdaten
             $stammdaten = DB::table('user_stammdaten')
                 ->where('fk_userID', $a->creator->UserID)
                 ->whereNull('gueltigBis')
@@ -724,22 +765,120 @@ class GeschaeftsstelleController extends Controller
                 'iban'             => $iban,
                 'zeitraum'         => $a->quartal ? $a->quartal->bezeichnung : '-',
                 'mitarbeiterID'    => $a->creator->UserID,
-
-                // --- NEUE FELDER ---
                 'datumGenehmigtAL' => $alDatum,
                 'genehmigtDurchAL' => $alName,
                 'datumFreigabeGS'  => $gsDatum,
                 'freigabeDurchGS'  => $gsName,
-                // -------------------
                 'strasse' => $stammdaten ? $stammdaten->strasse : '',
                 'hausnr'  => $stammdaten ? $stammdaten->hausnr : '',
                 'plz'     => $stammdaten ? $stammdaten->plz : '',
                 'ort'     => $stammdaten ? $stammdaten->ort : '',
-
                 'details'          => $mappedDetails
             ];
         })->values();
 
         return response()->json($result);
+    }
+    /**
+     * [GET] Budget-Übersicht aller Übungsleiter für das aktuelle Jahr
+     * Zeigt, wie viel von der Ehrenamtspauschale (Limit) bereits verbraucht wurde.
+     */
+    public function getJahresBudgets(Request $request)
+    {
+        $year = (int) $request->query('year', now()->year);
+
+        // 1. Limit laden
+        //$limitObj = \App\Models\Limit::where('jahr', $year)->first();
+        $limitObj = \App\Models\Limit::where('gueltigVon', '<=', now())
+            ->where(function ($query) {
+                $query->whereNull('gueltigBis')
+                    ->orWhere('gueltigBis', '>=', now());
+            })
+            ->orderBy('gueltigVon', 'desc')
+            ->first();
+        $limitWert = $limitObj ? (float)$limitObj->wert : 3000.00;
+
+        // 2. Alle relevanten User laden (die Übungsleiter sind)
+        // Wir holen die User-IDs aus der Verknüpfungstabelle
+        $ulIds = \App\Models\UserRolleAbteilung::whereHas('rolle', function($q) {
+            $q->where('bezeichnung', 'Uebungsleiter');
+        })
+            ->pluck('fk_userID')
+            ->unique();
+
+        $users = \App\Models\User::whereIn('UserID', $ulIds)
+            ->orderBy('name')
+            ->get();
+
+        // 3. PERFORMANCE: Alle Daten für das Jahr vorab laden (Eager Loading)
+        // Anstatt 100x die DB zu fragen, holen wir alles einmal.
+
+        // Alle Einträge des Jahres
+        $allEntries = \App\Models\Stundeneintrag::whereYear('datum', $year)->get()->groupBy('createdBy');
+
+        // Alle Stundensätze
+        $allRates = \App\Models\Stundensatz::all()->groupBy('fk_userID');
+
+        // Alle Zuschläge
+        $alleZuschlaege = \App\Models\Zuschlag::orderBy('gueltigVon')->get();
+
+        // Yasumi
+        $provider = null;
+        try {
+            if (class_exists(\Yasumi\Yasumi::class)) {
+                $provider = \Yasumi\Yasumi::create('Germany/NorthRhineWestphalia', $year);
+            }
+        } catch (\Exception $e) {}
+
+        // 4. Berechnung für jeden User
+        $result = $users->map(function($user) use ($limitWert, $allEntries, $allRates, $alleZuschlaege, $provider) {
+
+            // Einträge dieses Users aus der Collection holen
+            $userEntries = $allEntries->get($user->UserID, collect([]));
+            $userRates = $allRates->get($user->UserID, collect([]));
+
+            $usedAmount = 0;
+
+            foreach ($userEntries as $eintrag) {
+                $datum = \Carbon\Carbon::parse($eintrag->datum)->startOfDay();
+
+                // Passenden Satz im Speicher suchen
+                $passenderSatz = $userRates->first(function ($satz) use ($datum, $eintrag) {
+                    if ($satz->fk_abteilungID != $eintrag->fk_abteilung) return false;
+                    $start = \Carbon\Carbon::parse($satz->gueltigVon)->startOfDay();
+                    $end = $satz->gueltigBis ? \Carbon\Carbon::parse($satz->gueltigBis)->endOfDay() : null;
+                    return $datum->gte($start) && ($end === null || $datum->lte($end));
+                });
+
+                if ($passenderSatz) {
+                    $basisSatz = (float)$passenderSatz->satz;
+                    $multiplikator = 1.0;
+
+                    // Feiertag prüfen
+                    if ($provider && $provider->isHoliday($datum)) {
+                        $zuschlagRegel = $alleZuschlaege->first(function($z) use ($datum) {
+                            return $datum->gte($z->gueltigVon) &&
+                                ($z->gueltigBis === null || $datum->lte($z->gueltigBis));
+                        });
+                        if ($zuschlagRegel) {
+                            $multiplikator = (float)$zuschlagRegel->faktor;
+                        }
+                    }
+
+                    $usedAmount += round($eintrag->dauer * $basisSatz * $multiplikator, 2);
+                }
+            }
+
+            return [
+                'user_id' => $user->UserID,
+                'name' => $user->name . ', ' . $user->vorname,
+                'used' => round($usedAmount, 2),
+                'limit' => $limitWert,
+                'percent' => $limitWert > 0 ? round(($usedAmount / $limitWert) * 100, 1) : 0,
+            ];
+        });
+
+        // Sortieren: Wer am meisten verbraucht hat, steht oben
+        return response()->json($result->sortByDesc('percent')->values());
     }
 }
