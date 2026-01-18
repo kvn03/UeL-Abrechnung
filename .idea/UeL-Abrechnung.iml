@@ -124,6 +124,10 @@
       <excludeFolder url="file://$MODULE_DIR$/backend/vendor/tijsverkoyen/css-to-inline-styles" />
       <excludeFolder url="file://$MODULE_DIR$/backend/vendor/vlucas/phpdotenv" />
       <excludeFolder url="file://$MODULE_DIR$/backend/vendor/voku/portable-ascii" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/vendor/azuyalabs/yasumi" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/vendor/symfony/brevo-mailer" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/vendor/symfony/http-client" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/vendor/symfony/http-client-contracts" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

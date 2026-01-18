@@ -21,6 +21,7 @@ interface TimesheetEntry {
   dauer: number
   kurs: string | null
   betrag?: number | null
+  isFeiertag?: boolean // <--- NEU
 }
 
 interface Submission {
@@ -64,7 +65,7 @@ const isLoading = ref<boolean>(false)
 const errorMessage = ref<string | null>(null)
 const rawSubmissions = ref<Submission[]>([])
 const isProcessingGroup = ref<number | null>(null)
-const isProcessingId = ref<number | null>(null) // Für Einzel-Button
+const isProcessingId = ref<number | null>(null)
 const expandedGroupIds = ref<number[]>([])
 
 // --- COMPUTED ---
@@ -113,6 +114,11 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+// Prüft, ob in einer Abrechnung Feiertage enthalten sind
+function hasHoliday(sub: Submission): boolean {
+  return sub.details.some(d => d.isFeiertag === true)
+}
+
 // --- API ---
 
 async function fetchSubmissions() {
@@ -158,8 +164,35 @@ function generateSinglePDF(item: Submission) {
   doc.text(`Betrag: ${formatCurrency(item.gesamtBetrag)}`, 14, yPos); yPos += 10;
   doc.setFont('helvetica', 'normal');
 
-  const tableData = item.details.map(d => [formatDate(d.datum), d.kurs || '-', d.dauer.toLocaleString('de-DE') + ' Std.', d.betrag ? formatCurrency(d.betrag) : '-'])
-  autoTable(doc, { startY: yPos, head: [['Datum', 'Kurs', 'Dauer', 'Betrag']], body: tableData, theme: 'grid', columnStyles: { 3: { halign: 'right' } } })
+  // DATEN FÜR PDF AUFBEREITEN
+  const tableData = item.details.map(d => {
+    // Hinweis im PDF, wenn Feiertag
+    const datumText = d.isFeiertag
+        ? formatDate(d.datum) + ' (Feiertag)'
+        : formatDate(d.datum);
+
+    return [
+      datumText,
+      d.kurs || '-',
+      d.dauer.toLocaleString('de-DE') + ' Std.',
+      d.betrag ? formatCurrency(d.betrag) : '-'
+    ]
+  })
+
+  autoTable(doc, {
+    startY: yPos,
+    head: [['Datum', 'Kurs', 'Dauer', 'Betrag']],
+    body: tableData,
+    theme: 'grid',
+    columnStyles: { 3: { halign: 'right' } },
+    // Feiertagszeilen im PDF hervorheben (optional)
+    didParseCell: function(data) {
+      if (data.section === 'body' && item.details[data.row.index].isFeiertag) {
+        data.cell.styles.textColor = [200, 100, 0]; // Orange/Rot für Text
+        data.cell.styles.fontStyle = 'bold';
+      }
+    }
+  })
 
   const finalY = (doc as any).lastAutoTable.finalY || 150
   doc.setFontSize(9); doc.setTextColor(150);
@@ -186,14 +219,51 @@ function generateGroupPDF(group: GroupedSubmission) {
   doc.setFontSize(11); doc.setTextColor(50); doc.setFont('helvetica', 'normal'); yPos += 10;
 
   const tableRows: any[] = []
+
+  // Wir müssen uns merken, welche Zeile ein Feiertag ist, für das Styling
+  const holidayRows: number[] = [];
+  let rowIndex = 0;
+
   group.items.forEach(sub => {
     sub.details.forEach(d => {
-      tableRows.push([formatDate(d.datum), `${sub.abteilung}: ${d.kurs || '-'}`, d.dauer.toLocaleString('de-DE') + ' Std.', d.betrag ? formatCurrency(Number(d.betrag)) : '-'])
+      const datumText = d.isFeiertag
+          ? formatDate(d.datum) + ' (Feiertag)'
+          : formatDate(d.datum);
+
+      if (d.isFeiertag) holidayRows.push(rowIndex);
+
+      tableRows.push([
+        datumText,
+        `${sub.abteilung}: ${d.kurs || '-'}`,
+        d.dauer.toLocaleString('de-DE') + ' Std.',
+        d.betrag ? formatCurrency(Number(d.betrag)) : '-'
+      ])
+      rowIndex++;
     })
   })
-  tableRows.sort((a, b) => { const dateA = a[0].split('.').reverse().join('-'); const dateB = b[0].split('.').reverse().join('-'); return dateA.localeCompare(dateB); })
 
-  autoTable(doc, { startY: yPos, head: [['Datum', 'Abteilung / Info', 'Dauer', 'Betrag']], body: tableRows, theme: 'grid', columnStyles: { 3: { halign: 'right' } } })
+  // Sortieren ist hier schwierig wegen der Zeilen-Indizes für Farben,
+  // daher lassen wir es in der Reihenfolge der Abrechnungen oder sortieren vorher die Objekte.
+  // Einfachheitshalber hier ohne Sortierung der Rohdaten im PDF-Generator
+
+  autoTable(doc, {
+    startY: yPos,
+    head: [['Datum', 'Abteilung / Info', 'Dauer', 'Betrag']],
+    body: tableRows,
+    theme: 'grid',
+    columnStyles: { 3: { halign: 'right' } },
+    didParseCell: function(data) {
+      // Da wir tableRows flach gemacht haben, ist data.row.index relativ zur Tabelle
+      // Wir prüfen, ob der Index in unserer holidayRows Liste ist
+      // (Achtung: autoTable sortiert evtl intern nicht, wenn wir body direkt übergeben)
+      // Einfacher Check: Enthält der Text "(Feiertag)"?
+      if (data.section === 'body' && String(data.row.raw[0]).includes('(Feiertag)')) {
+        data.cell.styles.textColor = [200, 100, 0];
+        data.cell.styles.fontStyle = 'bold';
+      }
+    }
+  })
+
   const finalY = (doc as any).lastAutoTable.finalY || 150
   const idList = group.items.map(i => '#' + i.AbrechnungID).join(', ');
   doc.setFontSize(9); doc.setTextColor(150);
@@ -203,7 +273,6 @@ function generateGroupPDF(group: GroupedSubmission) {
 
 // --- PAY ACTIONS ---
 
-// 1. Alles bezahlen (Gruppe)
 async function payGroup(group: GroupedSubmission) {
   const ids = group.items.map(i => i.AbrechnungID)
   if (!confirm(`Alles für ${group.mitarbeiterName} (${formatCurrency(group.totalBetrag)}) bezahlen?`)) return
@@ -218,14 +287,11 @@ async function payGroup(group: GroupedSubmission) {
   }
 }
 
-// 2. Einzeln bezahlen (NEU)
 async function paySingle(item: Submission) {
   if (!confirm(`Abrechnung #${item.AbrechnungID} (${formatCurrency(item.gesamtBetrag)}) als bezahlt markieren?`)) return
   isProcessingId.value = item.AbrechnungID
   try {
-    // Wir nutzen hier wieder die Single-Route
     await axios.post(`${API_BASE}/abrechnungen/${item.AbrechnungID}/finalize`)
-    // Aus der Liste entfernen -> Vue Computed Property aktualisiert die Gruppe automatisch
     rawSubmissions.value = rawSubmissions.value.filter(s => s.AbrechnungID !== item.AbrechnungID)
   } catch (error: any) {
     alert('Fehler: ' + (error.response?.data?.message || 'Fehler'))
@@ -262,8 +328,6 @@ onMounted(() => {
           <div class="text-caption text-medium-emphasis">
             Hier erscheinen alle Abrechnungen, die den Freigabeprozess durchlaufen haben, aber noch
             nicht ausgezahlt wurden.
-            <br>Die Abrechnungen werden nach Mitarbeiter gruppiert und können je
-            nach Wunsch einzeln oder zusammen <br>ausgezahlt werden.
           </div>
         </div>
         <v-btn size="small" variant="text" color="primary" :loading="isLoading" @click="fetchSubmissions">
@@ -347,6 +411,17 @@ onMounted(() => {
                     <div>
                       <div class="font-weight-bold d-flex align-center">
                         {{ sub.abteilung }}
+
+                        <v-chip
+                            v-if="hasHoliday(sub)"
+                            size="x-small"
+                            color="orange-darken-1"
+                            variant="flat"
+                            class="ml-2 font-weight-bold"
+                            prepend-icon="mdi-party-popper"
+                        >
+                          Enthält Feiertage
+                        </v-chip>
                       </div>
                       <div class="text-caption">{{ sub.zeitraum }} (ID: #{{ sub.AbrechnungID }})</div>
                     </div>

@@ -13,7 +13,7 @@ function goBack() {
 const API_BASE = import.meta.env.VITE_API_URL + '/api'
 const API_URL = `${API_BASE}/geschaeftsstelle/abrechnungen`
 
-// --- TYPES (Erweitert um Betrag) ---
+// --- TYPES ---
 interface TimesheetEntry {
   EintragID: number
   datum: string
@@ -21,7 +21,8 @@ interface TimesheetEntry {
   ende: string
   dauer: number
   kurs: string
-  betrag: number | null // <--- NEU
+  betrag: number | null
+  isFeiertag?: boolean // <--- WICHTIG FÜR DIE FARBE
   fk_abrechnungID?: number
 }
 
@@ -31,7 +32,7 @@ interface Submission {
   quartal: string
   zeitraum: string
   stunden: number
-  gesamtBetrag: number // <--- NEU
+  gesamtBetrag: number
   datumGenehmigtAL: string
   genehmigtDurch: string
   details: TimesheetEntry[]
@@ -79,6 +80,23 @@ function formatCurrency(val: number | null | undefined) {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(val)
 }
 
+// --- HELPER: Datum Formatieren (DD.MM.YYYY) ---
+function formatDate(dateStr: string) {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  })
+}
+
+// --- HELPER: Zeit Formatieren (HH:MM) ---
+function formatTime(timeStr: string) {
+  if (!timeStr) return ''
+  return timeStr.substring(0, 5)
+}
+
 // --- HELPER: Summe neu berechnen ---
 function recalculateTotal(submissionId: number) {
   const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
@@ -105,7 +123,7 @@ async function fetchReleaseSubmissions() {
     const response = await axios.get<Submission[]>(API_URL)
     submissions.value = response.data
 
-    // Fallback Berechnung, falls Backend noch alt ist
+    // Fallback Berechnung
     submissions.value.forEach(s => {
       if (s.gesamtBetrag === undefined) {
         s.gesamtBetrag = s.details.reduce((acc, d) => acc + (d.betrag || 0), 0)
@@ -163,7 +181,7 @@ async function submitRejection() {
 
 // --- AKTION: LÖSCHEN ---
 async function deleteEntry(entry: TimesheetEntry, submissionId: number) {
-  if (!confirm(`Eintrag vom ${entry.datum} wirklich löschen?`)) return
+  if (!confirm(`Eintrag vom ${formatDate(entry.datum)} wirklich löschen?`)) return
   try {
     await axios.delete(`${API_BASE}/geschaeftsstelle/stundeneintrag/${entry.EintragID}`)
     const subIndex = submissions.value.findIndex(s => s.AbrechnungID === submissionId)
@@ -193,7 +211,6 @@ function openEditDialog(entry: TimesheetEntry, submissionId: number) {
 
   const rawDate = entry.datum || '';
   const formattedDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
-  const formatTime = (t: string) => (t && t.length >= 5) ? t.substring(0, 5) : '';
 
   formData.value = {
     datum: formattedDate,
@@ -326,7 +343,13 @@ onMounted(() => {
 
             <v-expand-transition>
               <div v-if="expandedIds.includes(item.AbrechnungID)" class="details-container">
-                <v-table density="compact" class="bg-transparent mb-2">
+
+                <div v-if="!item.details || item.details.length === 0" class="text-center pa-4 text-medium-emphasis">
+                  <v-icon icon="mdi-alert-circle-outline" class="mr-2"></v-icon>
+                  Keine Details verfügbar (Backend liefert leere Liste).
+                </div>
+
+                <v-table v-else density="compact" class="bg-transparent mb-2">
                   <thead>
                   <tr>
                     <th class="text-left">Datum</th>
@@ -338,12 +361,28 @@ onMounted(() => {
                   </tr>
                   </thead>
                   <tbody>
-                  <tr v-for="detail in item.details" :key="detail.EintragID">
-                    <td>{{ detail.datum }}</td>
-                    <td>{{ detail.beginn }} - {{ detail.ende }}</td>
+                  <tr
+                      v-for="detail in item.details"
+                      :key="detail.EintragID"
+                      :class="{ 'bg-orange-lighten-5': detail.isFeiertag }"
+                  >
+                    <td>
+                      {{ formatDate(detail.datum) }}
+                      <span v-if="detail.isFeiertag" class="text-caption text-orange-darken-2 ml-1 font-weight-bold">
+                        (Feiertag)
+                      </span>
+                    </td>
+
+                    <td>{{ formatTime(detail.beginn) }} - {{ formatTime(detail.ende) }}</td>
+
                     <td>{{ detail.kurs }}</td>
-                    <td class="text-right">{{ detail.dauer }} Std.</td>
-                    <td class="text-right font-weight-medium">{{ formatCurrency(detail.betrag) }}</td>
+
+                    <td class="text-right">{{ detail.dauer.toLocaleString('de-DE') }} Std.</td>
+
+                    <td class="text-right font-weight-medium" :class="{ 'text-orange-darken-2': detail.isFeiertag }">
+                      {{ formatCurrency(detail.betrag) }}
+                    </td>
+
                     <td class="text-right">
                       <v-btn icon="mdi-pencil" size="x-small" variant="text" color="blue" class="mr-1" @click="openEditDialog(detail, item.AbrechnungID)"></v-btn>
                       <v-btn icon="mdi-delete" size="x-small" variant="text" color="red" @click="deleteEntry(detail, item.AbrechnungID)"></v-btn>
@@ -421,4 +460,6 @@ onMounted(() => {
 .value { font-weight: 400; color: rgba(0, 0, 0, 0.87); }
 .submission-actions { display: flex; align-items: center; margin-left: 24px; }
 .details-container { background-color: #fafafa; border-top: 1px solid rgba(0,0,0,0.06); padding: 16px; }
+/* Farbe für Feiertage */
+.bg-orange-lighten-5 { background-color: #FFF3E0 !important; }
 </style>

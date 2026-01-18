@@ -19,11 +19,13 @@ interface HistoryEntry {
   kommentar: string | null
 }
 
+// WICHTIG: isFeiertag hinzugefügt
 interface DetailEntry {
   datum: string
   dauer: number
   kurs: string
   betrag: number
+  isFeiertag?: boolean
 }
 
 interface HistoryItem {
@@ -106,13 +108,6 @@ function formatDate(dateStr: string) {
 }
 
 function getStatusColor(id: number) {
-  // Annahme der Status-IDs (anpassen falls anders)
-  // 11 = Eingereicht (ÜL)
-  // 20/21 = Genehmigungsprozess
-  // 22 = Warten auf Zahlung
-  // 23 = Bezahlt / Abgeschlossen
-  // 12/24 = Abgelehnt / Storniert
-
   if (id === 23) return 'green' // Bezahlt
   if (id === 22) return 'orange-darken-1' // Warten auf Zahlung
   if (id === 21) return 'blue' // Genehmigt AL
@@ -262,12 +257,30 @@ onMounted(() => {
             </tr>
             </thead>
             <tbody>
-            <tr v-for="(d, i) in selectedItem.details" :key="i">
-              <td>{{ formatDate(d.datum) }}</td>
-              <td>{{ d.kurs }}</td>
+            <tr
+                v-for="(d, i) in selectedItem.details"
+                :key="i"
+                :class="{ 'bg-orange-lighten-5': d.isFeiertag }"
+            >
+              <td>
+                {{ formatDate(d.datum) }}
+                <v-icon v-if="d.isFeiertag" icon="mdi-party-popper" color="orange-darken-2" size="small" class="ml-1" title="Feiertag" />
+              </td>
+
+              <td>
+                {{ d.kurs }}
+                <span v-if="d.isFeiertag" class="text-caption text-orange-darken-2 font-weight-bold ml-1">
+                    (Feiertag)
+                  </span>
+              </td>
+
               <td class="text-right">{{ d.dauer.toLocaleString('de-DE') }}</td>
-              <td class="text-right">{{ formatCurrency(d.betrag) }}</td>
+
+              <td class="text-right" :class="{ 'text-orange-darken-2 font-weight-bold': d.isFeiertag }">
+                {{ formatCurrency(d.betrag) }}
+              </td>
             </tr>
+
             <tr class="bg-grey-lighten-5 font-weight-bold">
               <td colspan="2">Summe</td>
               <td class="text-right">{{ selectedItem.stunden.toLocaleString('de-DE') }}</td>
@@ -309,4 +322,7 @@ onMounted(() => {
 .placeholder { min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.02); border-radius: 8px; margin-top: 8px; }
 .border-top { border-top: 1px solid rgba(0,0,0,0.12); }
 .border { border: 1px solid rgba(0,0,0,0.12); }
+
+/* Wichtig für die Hintergrundfarbe */
+.bg-orange-lighten-5 { background-color: #FFF3E0 !important; }
 </style>

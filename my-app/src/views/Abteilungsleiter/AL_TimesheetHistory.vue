@@ -9,7 +9,7 @@ function goBack() {
   router.push({ name: 'Dashboard' })
 }
 
-// WICHTIG: Hier auf den AL-Endpunkt zeigen
+// API Endpunkt für Abteilungsleiter Historie
 const API_URL = import.meta.env.VITE_API_URL + '/api/abteilungsleiter/abrechnungen-historie'
 
 // --- Interfaces ---
@@ -20,11 +20,13 @@ interface HistoryEntry {
   kommentar: string | null
 }
 
+// WICHTIG: isFeiertag hier definieren!
 interface DetailEntry {
   datum: string
   dauer: number
   kurs: string
   betrag: number
+  isFeiertag?: boolean
 }
 
 interface HistoryItem {
@@ -247,6 +249,7 @@ onMounted(() => {
           <v-divider class="mb-4"></v-divider>
 
           <div class="text-subtitle-2 mb-2">Enthaltene Stunden</div>
+
           <v-table density="compact" class="border rounded mb-4">
             <thead>
             <tr>
@@ -257,12 +260,37 @@ onMounted(() => {
             </tr>
             </thead>
             <tbody>
-            <tr v-for="(d, i) in selectedItem.details" :key="i">
-              <td>{{ formatDate(d.datum) }}</td>
-              <td>{{ d.kurs }}</td>
+            <tr
+                v-for="(d, i) in selectedItem.details"
+                :key="i"
+                :class="{ 'feiertag-row': d.isFeiertag }"
+            >
+              <td>
+                {{ formatDate(d.datum) }}
+                <v-icon
+                    v-if="d.isFeiertag"
+                    icon="mdi-party-popper"
+                    color="orange-darken-2"
+                    size="small"
+                    class="ml-1"
+                    title="Feiertagszuschlag"
+                />
+              </td>
+
+              <td>
+                {{ d.kurs }}
+                <span v-if="d.isFeiertag" class="text-caption text-orange-darken-2 font-weight-bold ml-1">
+                    (Feiertag)
+                  </span>
+              </td>
+
               <td class="text-right">{{ d.dauer.toLocaleString('de-DE') }}</td>
-              <td class="text-right">{{ formatCurrency(d.betrag) }}</td>
+
+              <td class="text-right" :class="{ 'text-orange-darken-2 font-weight-bold': d.isFeiertag }">
+                {{ formatCurrency(d.betrag) }}
+              </td>
             </tr>
+
             <tr class="bg-grey-lighten-5 font-weight-bold">
               <td colspan="2">Summe</td>
               <td class="text-right">{{ selectedItem.stunden.toLocaleString('de-DE') }}</td>
@@ -304,4 +332,9 @@ onMounted(() => {
 .placeholder { min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.02); border-radius: 8px; margin-top: 8px; }
 .border-top { border-top: 1px solid rgba(0,0,0,0.12); }
 .border { border: 1px solid rgba(0,0,0,0.12); }
+
+/* WICHTIG: Die Klasse für die Hervorhebung */
+.feiertag-row {
+  background-color: #FFF3E0 !important; /* Helles Orange */
+}
 </style>
