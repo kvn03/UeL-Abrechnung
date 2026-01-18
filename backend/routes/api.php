@@ -65,6 +65,9 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('/geschaeftsstelle/stundensatz-historie', [GeschaeftsstelleController::class, 'getStundensatzHistorie']);
         Route::get('/geschaeftsstelle/auszahlungen', [GeschaeftsstelleController::class, 'getAuszahlungen']);
         Route::post('/geschaeftsstelle/abrechnungen/finalize-bulk', [App\Http\Controllers\Geschaeftsstelle\GeschaeftsstelleController::class, 'finalizeBulk']);
+        Route::get('/geschaeftsstelle/lizenzen', [App\Http\Controllers\Geschaeftsstelle\GS_LizenzController::class, 'index']);
+        Route::put('/geschaeftsstelle/lizenzen/{id}', [App\Http\Controllers\Geschaeftsstelle\GS_LizenzController::class, 'update']);
+        Route::delete('/geschaeftsstelle/lizenzen/{id}', [App\Http\Controllers\Geschaeftsstelle\GS_LizenzController::class, 'destroy']);
     });
     //Abteilungsleiter-Routen
     Route::group(['middleware' => ['al']], function ()

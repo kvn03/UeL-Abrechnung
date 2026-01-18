@@ -27,6 +27,7 @@ import UelStundensatzUebersicht from '../views/Uebungsleiter/UEL_StundensatzUebe
 import AdminDepartments from "../views/Administrator/AdminDepartments.vue"
 import AdminZuschlag from "../views/Administrator/AdminZuschlag.vue"
 import AdminLimits from "../views/Administrator/AdminLimits.vue";
+import GS_LizenzenVerwalten from "../views/Geschaeftsstelle/GS_LizenzenVerwalten.vue";
 
 const API_URL = import.meta.env.VITE_API_URL + '/api'
 
@@ -56,6 +57,7 @@ const routes: RouteRecordRaw[] = [
     {path: '/admin/abteilungen', name: 'AdminDepartments', component: AdminDepartments, meta: { requiresAuth: true }},
     {path: '/admin/zuschlaege', name: 'AdminZuschlag', component: AdminZuschlag, meta: {requiresAuth: true}},
     {path: '/limits', name: 'AdminLimits', component: AdminLimits, meta: { requiresAuth: true }},
+    {path: '/geschaeftsstelle/licenses', name: 'ManageLicenses', component: GS_LizenzenVerwalten, meta: { requiresAuth: true }},
 
 ]
 

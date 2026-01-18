@@ -19,7 +19,7 @@ return new class extends Migration
 
             // Im Diagramm steht 'text'. In Laravel ist 'string' (VARCHAR) meist performanter für Pfade,
             // aber 'text' speichert mehr Zeichen. Ich nehme hier text wie im Bild.
-            $table->text('datei');
+            $table->text('datei')->nullable();
 
             // Fremdschlüssel zu user
             $table->unsignedBigInteger('fk_userID');

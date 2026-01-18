@@ -9,13 +9,9 @@ use Illuminate\Support\Facades\Auth;
 
 class LizenzController extends Controller
 {
-    /**
-     * Alle Lizenzen des Users abrufen
-     */
     public function getLizenzen()
     {
         $userId = Auth::id();
-        // Wir sortieren nach Ablaufdatum, damit die kritischen oben stehen
         $lizenzen = UserLizenzen::where('fk_userID', $userId)
             ->orderBy('gueltigBis', 'asc')
             ->get();
@@ -24,52 +20,33 @@ class LizenzController extends Controller
     }
 
     /**
-     * Lizenz hinzufügen oder bearbeiten
+     * Lizenz hinzufügen (Bearbeiten entfernt, Datei-Upload entfernt)
      */
     public function saveLizenz(Request $request)
     {
         $userId = Auth::id();
 
+        // Validierung: Keine ID und keine Datei mehr
         $validated = $request->validate([
-            'id'          => 'nullable|integer|exists:user_lizenzen,ID', // ID ist optional (nur bei Bearbeitung)
             'nummer'      => 'nullable|string|max:50',
             'name'        => 'required|string|max:100',
             'gueltigVon'  => 'required|date',
             'gueltigBis'  => 'required|date|after_or_equal:gueltigVon',
-            'datei'       => 'nullable|url',
         ]);
 
-        if (!empty($validated['id'])) {
-            // Update existierender Eintrag
-            $lizenz = UserLizenzen::where('ID', $validated['id'])
-                ->where('fk_userID', $userId) // Sicherheitscheck: Gehört die Lizenz mir?
-                ->firstOrFail();
+        // Immer einen neuen Eintrag erstellen
+        $lizenz = UserLizenzen::create([
+            'fk_userID'  => $userId,
+            'nummer'     => $validated['nummer'],
+            'name'       => $validated['name'],
+            'gueltigVon' => $validated['gueltigVon'],
+            'gueltigBis' => $validated['gueltigBis'],
+            'datei'      => null, // Datei bleibt leer, wird von GS/AL gemacht
+        ]);
 
-            $lizenz->update([
-                'nummer'     => $validated['nummer'],
-                'name'       => $validated['name'],
-                'gueltigVon' => $validated['gueltigVon'],
-                'gueltigBis' => $validated['gueltigBis'],
-                'datei'      => $validated['datei'],
-            ]);
-        } else {
-            // Neuer Eintrag
-            $lizenz = UserLizenzen::create([
-                'fk_userID'  => $userId,
-                'nummer'     => $validated['nummer'],
-                'name'       => $validated['name'],
-                'gueltigVon' => $validated['gueltigVon'],
-                'gueltigBis' => $validated['gueltigBis'],
-                'datei'      => $validated['datei'],
-            ]);
-        }
-
-        return response()->json(['message' => 'Lizenz gespeichert.', 'data' => $lizenz]);
+        return response()->json(['message' => 'Lizenz gemeldet.', 'data' => $lizenz]);
     }
 
-    /**
-     * Lizenz löschen
-     */
     public function deleteLizenz($id)
     {
         $userId = Auth::id();

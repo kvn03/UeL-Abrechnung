@@ -311,6 +311,15 @@ function formatCurrency(val: number) {
           >
             Alle Stundensätze verwalten
           </v-btn>
+          <v-btn
+              class="w-100"
+              color="deep-purple"
+              variant="tonal"
+              prepend-icon="mdi-certificate"
+              @click="router.push({ name: 'ManageLicenses' })"
+          >
+            Lizenzen verwalten
+          </v-btn>
 
           <v-btn
               class="w-100"
