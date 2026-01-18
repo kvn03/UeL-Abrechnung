@@ -418,10 +418,10 @@ class AbteilungsleiterController extends Controller
             return response()->json(['message' => 'Keine Berechtigung für diese Abteilung'], 403);
         }
 
+        // 4. Abrechnung-Status auf genehmigt setzen
         // Status ID 2 = Genehmigt (Anpassen!)
         $statusGenehmigt = 21;
 
-        // Log schreiben
         \App\Models\AbrechnungStatusLog::create([
             'fk_abrechnungID' => $abrechnung->AbrechnungID,
             'fk_statusID'     => $statusGenehmigt,

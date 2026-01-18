@@ -11,6 +11,8 @@ use App\Http\Controllers\Uebungsleiter\StammdatenController;
 use App\Http\Controllers\Uebungsleiter\LizenzController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\LimitController;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -30,6 +32,7 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         return $request->user();
     });
     Route::get('/dashboard', [AuthController::class, 'dashboard']);
+    Route::get('/limits/trainer-overview', [LimitController::class, 'getUebungsleiterLimitOverview']);
     Route::get('/abrechnung/meine/{id}', [AbrechnungController::class, 'show']);
     Route::get('/meine-uel-abteilungen', [AbteilungController::class, 'getMeineUelAbteilungen']);
     Route::post('/stundeneintrag', [StundeneintragController::class, 'store']);

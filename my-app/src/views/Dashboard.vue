@@ -268,6 +268,15 @@ function formatCurrency(val: number) {
           >
             Abrechnungshistorie
           </v-btn>
+          <v-btn
+              class="w-100"
+              color="blue"
+              variant="tonal"
+              prepend-icon="mdi-cash-lock"
+              @click="router.push({ name: 'UebungsleiterLimitOverviewAL' })"
+          >
+            Übungsleiter Limit-Übersicht
+          </v-btn>
 
           <div></div>
         </template>
@@ -328,6 +337,15 @@ function formatCurrency(val: number) {
               @click="router.push({ name: 'AdminLimits' })"
           >
             Übungsleiterpauschale verwalten
+          </v-btn>
+          <v-btn
+              class="w-100"
+              color="teal"
+              variant="tonal"
+              prepend-icon="mdi-cash-lock"
+              @click="router.push({ name: 'UebungsleiterLimitOverviewGS' })"
+          >
+            Übungsleiter Limit-Übersicht
           </v-btn>
         </template>
 

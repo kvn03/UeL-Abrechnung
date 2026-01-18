@@ -56,7 +56,8 @@ const routes: RouteRecordRaw[] = [
     {path: '/admin/abteilungen', name: 'AdminDepartments', component: AdminDepartments, meta: { requiresAuth: true }},
     {path: '/admin/zuschlaege', name: 'AdminZuschlag', component: AdminZuschlag, meta: {requiresAuth: true}},
     {path: '/limits', name: 'AdminLimits', component: AdminLimits, meta: { requiresAuth: true }},
-
+    {path: '/limits/overview',name: 'UebungsleiterLimitOverviewAL',component: () => import('../views/Abteilungsleiter/AL_UebungsleiterLimitOverview.vue'),meta: { requiresAuth: true }},
+    {path: '/limits/overview-gs',name: 'UebungsleiterLimitOverviewGS',component: () => import('../views/Geschaeftsstelle/GS_UebungsleiterLimitOverview.vue'),meta: { requiresAuth: true }},
 ]
 
 const router = createRouter({
