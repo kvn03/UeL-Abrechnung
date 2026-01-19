@@ -8,6 +8,7 @@ use App\Models\Limit;
 use App\Models\Stundeneintrag;
 use App\Models\Stundensatz;
 use App\Models\RolleDefinition;
+use App\Models\Zuschlag;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -101,30 +102,71 @@ class LimitController extends Controller
     {
         $usedAmount = 0;
 
-        // Alle Einträge dieses Jahres laden
-        $eintraege = Stundeneintrag::where('createdBy', $user->UserID)
-            ->whereYear('datum', now()->year)
-            ->get();
+        try {
+            $year = now()->year;
 
-        // Alle Stundensätze des Users laden
-        $stundensaetze = Stundensatz::where('fk_userID', $user->UserID)->get();
+            // A. Daten laden
+            $eintraege = Stundeneintrag::where('createdBy', $user->UserID)
+                ->whereYear('datum', $year)
+                ->get();
 
-        foreach ($eintraege as $eintrag) {
-            $datum = Carbon::parse($eintrag->datum);
+            $stundensaetze = Stundensatz::where('fk_userID', $user->UserID)->get();
 
-            // Passenden Satz für das Datum und die Abteilung finden
-            $passenderSatz = $stundensaetze->first(function ($satz) use ($datum, $eintrag) {
-                return $satz->fk_abteilungID == $eintrag->fk_abteilung &&
-                    $datum->gte($satz->gueltigVon) &&
-                    ($satz->gueltigBis === null || $datum->lte($satz->gueltigBis));
-            });
+            // Zuschläge laden (für den Faktor)
+            $alleZuschlaege = \App\Models\Zuschlag::orderBy('gueltigVon')->get();
 
-            if ($passenderSatz) {
-                $usedAmount += $eintrag->dauer * $passenderSatz->satz;
+            // B. Yasumi laden (Fehler abfangen, falls Library fehlt)
+            $provider = null;
+            if (class_exists(\Yasumi\Yasumi::class)) {
+                $provider = \Yasumi\Yasumi::create('Germany/BadenWurttemberg', $year);
             }
+
+            foreach ($eintraege as $eintrag) {
+                $datum = Carbon::parse($eintrag->datum)->startOfDay();
+
+                // Passenden Satz finden
+                $passenderSatz = $stundensaetze->first(function ($satz) use ($datum, $eintrag) {
+                    // Abteilung Check
+                    if ($satz->fk_abteilungID != $eintrag->fk_abteilung) return false;
+
+                    // Datum Check
+                    $start = Carbon::parse($satz->gueltigVon)->startOfDay();
+                    $end = $satz->gueltigBis ? Carbon::parse($satz->gueltigBis)->endOfDay() : null;
+
+                    return $datum->gte($start) && ($end === null || $datum->lte($end));
+                });
+
+                if ($passenderSatz) {
+                    $basisSatz = (float)$passenderSatz->satz;
+                    $multiplikator = 1.0; // Standard 100%
+
+                    // Feiertags-Check
+                    if ($provider && $provider->isHoliday($datum)) {
+                        // Passenden Zuschlag aus DB suchen
+                        $zuschlagRegel = $alleZuschlaege->first(function($z) use ($datum) {
+                            $zStart = Carbon::parse($z->gueltigVon)->startOfDay();
+                            $zEnd = $z->gueltigBis ? Carbon::parse($z->gueltigBis)->endOfDay() : null;
+
+                            return $datum->gte($zStart) && ($zEnd === null || $datum->lte($zEnd));
+                        });
+
+                        if ($zuschlagRegel) {
+                            // Faktor übernehmen (z.B. 1.35)
+                            $multiplikator = (float)$zuschlagRegel->faktor;
+                        }
+                    }
+
+                    // Berechnung: Dauer * Satz * Multiplikator
+                    $usedAmount += round($eintrag->dauer * $basisSatz * $multiplikator, 2);
+                }
+            }
+
+        } catch (\Exception $e) {
+            // Fehler loggen, damit Berechnung nicht abstürzt
+            \Illuminate\Support\Facades\Log::error("LimitController Calculation Error: " . $e->getMessage());
         }
 
-        return $usedAmount;
+        return round($usedAmount, 2);
     }
 
     /**

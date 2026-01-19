@@ -76,7 +76,7 @@ class GeschaeftsstelleController extends Controller
                 $satz = $validRate ? (float)$validRate->satz : 0;
 
                 // --- NEU: Feiertag + Zuschlag ---
-                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $provider = Yasumi::create('Germany/BadenWurttemberg', $eintragDatum->year);
                 $isFeiertag = $provider->isHoliday($eintragDatum);
                 $multiplikator = 1.0;
 
@@ -196,7 +196,7 @@ class GeschaeftsstelleController extends Controller
                 $satz = $validRate ? (float)$validRate->satz : 0;
 
                 // --- NEU: Feiertag + Zuschlag ---
-                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $provider = Yasumi::create('Germany/BadenWurttemberg', $eintragDatum->year);
                 $isFeiertag = $provider->isHoliday($eintragDatum);
                 $multiplikator = 1.0;
 
@@ -722,7 +722,7 @@ class GeschaeftsstelleController extends Controller
                 $satz = $validRate ? (float)$validRate->satz : 0;
 
                 // Feiertag + Zuschlag
-                $provider = \Yasumi\Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $provider = \Yasumi\Yasumi::create('Germany/BadenWurttemberg', $eintragDatum->year);
                 $isFeiertag = $provider->isHoliday($eintragDatum);
                 $multiplikator = 1.0;
 
@@ -826,7 +826,7 @@ class GeschaeftsstelleController extends Controller
         $provider = null;
         try {
             if (class_exists(\Yasumi\Yasumi::class)) {
-                $provider = \Yasumi\Yasumi::create('Germany/NorthRhineWestphalia', $year);
+                $provider = \Yasumi\Yasumi::create('Germany/BadenWurttemberg', $year);
             }
         } catch (\Exception $e) {}
 

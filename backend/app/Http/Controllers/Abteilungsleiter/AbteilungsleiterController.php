@@ -354,7 +354,7 @@ class AbteilungsleiterController extends Controller
                     $stundensatz = $validRate ? (float)$validRate->satz : 0;
 
                     // B. Feiertag prüfen (Yasumi)
-                    $provider = Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                    $provider = Yasumi::create('Germany/BadenWurttemberg', $eintragDatum->year);
                     $isFeiertag = $provider->isHoliday($eintragDatum);
 
                     $multiplikator = 1.0;
@@ -593,7 +593,7 @@ class AbteilungsleiterController extends Controller
                 $stundensatz = $validRate ? (float)$validRate->satz : 0;
 
                 // Feiertag & Zuschlag prüfen
-                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $eintragDatum->year);
+                $provider = Yasumi::create('Germany/BadenWurttemberg', $eintragDatum->year);
                 $isFeiertag = $provider->isHoliday($eintragDatum);
 
                 $faktorZuschlag = 0;

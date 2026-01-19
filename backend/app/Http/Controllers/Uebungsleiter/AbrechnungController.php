@@ -181,7 +181,7 @@ class AbrechnungController extends Controller
                 $satz = $validRate ? (float)$validRate->satz : 0;
 
                 // Feiertags-Logik
-                $provider = Yasumi::create('Germany/NorthRhineWestphalia', $datum->year);
+                $provider = Yasumi::create('Germany/BadenWurttemberg', $datum->year);
                 $isFeiertag = $provider->isHoliday($datum);
                 $multiplikator = 1.0;
 
@@ -272,7 +272,7 @@ class AbrechnungController extends Controller
             $satz = $validRate ? (float)$validRate->satz : 0;
 
             // Feiertags-Logik
-            $provider = Yasumi::create('Germany/NorthRhineWestphalia', $datum->year);
+            $provider = Yasumi::create('Germany/BadenWurttemberg', $datum->year);
             $isFeiertag = $provider->isHoliday($datum);
             $multiplikator = 1.0;
 
